@@ -32,6 +32,7 @@ import {
   Network,
   Package,
   PackageCheck,
+  PackagePlus,
   RefreshCw,
   Search,
   Server,
@@ -64,6 +65,7 @@ import {
 import { RmmMonitoringPolicies } from './RmmMonitoringPolicies.jsx'
 import { RmmNetworkDiscovery } from './RmmNetworkDiscovery.jsx'
 import { RmmPatching as RmmPatchingWorkspace } from './RmmPatching.jsx'
+import { RmmAppPortal } from './RmmAppPortal.jsx'
 import { RmmAgentDeployment } from './RmmAgentDeployment.jsx'
 import { RmmAutomation } from './RmmAutomationWorkspace.jsx'
 import { RmmConnect } from './RmmConnect.jsx'
@@ -1908,11 +1910,14 @@ function RmmSoftware({ devices = [] }) {
     <PageHeading activeView="software" />
     <nav className="rmm-software-workspace-tabs" aria-label="Software workspace">
       <button className={view === 'catalogue' ? 'active' : ''} onClick={() => setView('catalogue')} type="button"><ShieldCheck size={15} /> Catalogue & qualification</button>
+      <button className={view === 'portal' ? 'active' : ''} onClick={() => setView('portal')} type="button"><PackagePlus size={15} /> App Portal</button>
       <button className={view === 'inventory' ? 'active' : ''} onClick={() => setView('inventory')} type="button"><Box size={15} /> Installed inventory <b>{applications.length}</b></button>
     </nav>
     {view === 'catalogue'
       ? <RmmPatchingWorkspace devices={devices} softwareOnly />
-      : <>
+      : view === 'portal'
+        ? <RmmAppPortal />
+        : <>
         <div className="rmm-request-stats"><div><strong>{applications.length}</strong><span>Unique application versions</span></div><div><strong>{reportingDevices}</strong><span>Devices reporting software</span></div><div><strong>{devices.length - reportingDevices}</strong><span>Awaiting inventory</span></div><div><strong>{applications.reduce((sum, app) => sum + app.deviceCount, 0)}</strong><span>Observed installations</span></div></div>
         <section className="rmm-table-card"><div className="rmm-table rmm-software-table"><div className="rmm-table-head"><span>Application</span><span>Version</span><span>Installed</span><span>Publisher</span><span>Scope</span><span /></div>{applications.map((app) => <div className="rmm-table-row" key={[app.name, app.version, app.publisher].join('|')}><span className="rmm-device-cell"><span className="rmm-device-icon neutral"><Box size={17} /></span><span><strong>{app.name}</strong><small>Observed from live device inventory</small></span></span><span><strong>{app.version}</strong></span><span><strong>{app.deviceCount}</strong><small>device{app.deviceCount === 1 ? '' : 's'}</small></span><span><strong>{app.publisher}</strong></span><span><StatusPill tone="neutral">{app.scopeLabel}</StatusPill></span><span /></div>)}</div>{!applications.length && <div className="rmm-empty"><PackageCheck size={24} /><strong>No software inventory yet</strong><span>Applications appear here after managed devices report their installed-software inventory.</span></div>}</section>
       </>}
