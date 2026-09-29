@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Hi5Central Connect</title>
+  <link rel="icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/connect/connect.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="https://hi5central.com">
+        <img src="/hi5central-logo.png" alt="Hi5Central" />
+        <span><strong>Hi5Central Connect</strong><span>One-time remote support</span></span>
+      </a>
+      <span class="secure-pill">Short-lived, consent-based connection</span>
+    </header>
+
+    <section class="grid">
+      <div class="intro">
+        <p class="eyebrow">Remote support</p>
+        <h1>Get help without installing the full agent.</h1>
+        <p class="lede">Enter the support code your technician gave you. You’ll see who is requesting access before anything is downloaded, and remote access ends when Hi5Central Connect closes.</p>
+        <div class="trust">
+          <div class="trust-item"><span class="trust-icon">✓</span><span><strong>No permanent installation.</strong> Hi5Central Connect runs only for this support session.</span></div>
+          <div class="trust-item"><span class="trust-icon">✓</span><span><strong>You stay in control.</strong> Closing the Connect app immediately ends the customer-side session.</span></div>
+          <div class="trust-item"><span class="trust-icon">✓</span><span><strong>One-time code.</strong> Support codes expire quickly and cannot be reused after they are claimed.</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="lookupStage">
+          <span class="step-badge">Step 1 of 2</span>
+          <h2>Enter your support code</h2>
+          <p>Your technician will give you an 8-digit code.</p>
+          <div class="field">
+            <label for="supportCode">Support code</label>
+            <input id="supportCode" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="1234-5678" />
+          </div>
+          <button id="lookupButton" class="primary" type="button">Check support code</button>
+          <div id="lookupError" class="error" role="alert"></div>
+        </div>
+
+        <div id="consentStage" class="hidden">
+          <span class="step-badge">Step 2 of 2</span>
+          <h2>Confirm the support request</h2>
+          <p>Check who is requesting access before you continue.</p>
+          <div class="request">
+            <div class="request-row"><span>Organisation</span><strong id="organisation">—</strong></div>
+            <div class="request-row"><span>Technician</span><strong id="technician">—</strong></div>
+            <div class="request-row"><span>Code expires</span><strong id="expires">—</strong></div>
+          </div>
+          <label class="consent">
+            <input id="consentCheck" type="checkbox" />
+            <span>I understand that the named technician will be able to view and control this computer while Hi5Central Connect is running. I can end access by closing the app.</span>
+          </label>
+          <button id="downloadButton" class="primary" type="button" disabled>Accept &amp; download for Windows</button>
+          <button id="backButton" class="secondary" type="button">Use a different code</button>
+          <div id="claimError" class="error" role="alert"></div>
+        </div>
+
+        <div id="downloadStage" class="hidden success">
+          <div class="success-mark">✓</div>
+          <h2>Your support app is ready</h2>
+          <p>Run the downloaded file to connect to your technician. It does not enroll this computer into Hi5Central RMM.</p>
+          <a id="downloadLink" class="download-link" href="#">Download Hi5Central Connect again</a>
+          <ol class="steps">
+            <li>Open <strong>Hi5CentralConnect-…exe</strong> from your Downloads folder.</li>
+            <li>This current test build is not yet code-signed, so Windows may show <strong>Unknown publisher</strong>. Only continue when you downloaded it from this Hi5Central Connect page.</li>
+            <li>Keep the Connect window open while your technician helps you. Close it at any time to end access.</li>
+          </ol>
+          <p class="fine">This ticket is short-lived and is tied to the support session you just approved.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>© Hi5Central · One-time remote support</footer>
+  </main>
+  <script src="/connect/connect.js"></script>
+</body>
+</html>

@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Hi5Central Viewer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #05070b;
+      --surface: rgba(13, 18, 28, 0.92);
+      --surface-2: rgba(18, 25, 38, 0.96);
+      --border: rgba(255,255,255,0.10);
+      --border-strong: rgba(255,255,255,0.16);
+      --accent: 99, 102, 241;
+      --text: #e6edf3;
+      --muted: rgba(230,237,243,0.58);
+      --danger: #f87171;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --overlay-strong: rgba(5, 7, 11, 0.92);
+    }
+
+    html, body {
+      overscroll-behavior: none;
+      overscroll-behavior-x: none;
+      -webkit-overflow-scrolling: auto;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #topbar {
+      height: 54px;
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+      align-items: center;
+      gap: 16px;
+      padding: 8px 14px;
+      background: linear-gradient(180deg, rgba(18, 25, 38, 0.98), rgba(11, 15, 23, 0.96));
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      -webkit-app-region: drag;
+      position: relative;
+      z-index: 20;
+    }
+    #topbar * { -webkit-app-region: no-drag; }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      color: white;
+      background:
+        radial-gradient(circle at 20% 15%, rgba(255,255,255,0.32), transparent 28px),
+        linear-gradient(135deg, rgb(var(--accent)), #06b6d4);
+      box-shadow: 0 10px 22px rgba(99,102,241,0.28);
+    }
+
+    #logo {
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: -0.3px;
+      white-space: nowrap;
+    }
+    #logo span { color: rgb(var(--accent)); }
+
+    .session-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    #status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    #status-dot.online { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,0.65); }
+    #status-dot.error  { background: var(--danger);  box-shadow: 0 0 8px rgba(248,113,113,0.65); }
+
+    #status-label {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #device-label {
+      font-size: 12px;
+      color: var(--muted);
+      justify-self: end;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 280px;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      position: relative;
+      justify-content: center;
+    }
+
+    .right-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .icon-btn,
+    #btn-monitor,
+    #btn-disconnect {
+      height: 34px;
+      min-width: 34px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border-radius: 11px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.035);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.15s, border-color 0.15s, transform 0.15s, opacity 0.15s;
+    }
+
+    .icon-btn:hover,
+    #btn-monitor:hover,
+    #btn-disconnect:hover {
+      background: rgba(255,255,255,0.075);
+      border-color: var(--border-strong);
+    }
+
+    .icon-btn.session-toggle-active { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+    .icon-btn:active,
+    #btn-monitor:active,
+    #btn-disconnect:active { transform: translateY(1px); }
+
+    .icon-btn:disabled,
+    #btn-monitor:disabled,
+    #btn-disconnect:disabled {
+      opacity: 0.35;
+      cursor: default;
+      transform: none;
+    }
+
+    .icon-btn .label,
+    #btn-monitor .label {
+      display: none;
+    }
+
+    #btn-monitor {
+      width: 34px;
+      padding: 0;
+      overflow: hidden;
+      color: transparent;
+      position: relative;
+    }
+    #btn-monitor::before {
+      content: "▣";
+      color: var(--text);
+      font-size: 16px;
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+    }
+
+    #btn-disconnect {
+      color: #fecaca;
+      border-color: rgba(248,113,113,0.25);
+      background: rgba(248,113,113,0.08);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 0 13px;
+    }
+    #btn-disconnect:hover { background: rgba(248,113,113,0.15); }
+
+    #monitor-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: 260px;
+      max-height: 320px;
+      overflow-y: auto;
+      background: #11161d;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 18px 38px rgba(0,0,0,0.45);
+      padding: 8px;
+      display: none;
+      z-index: 100;
+    }
+    #monitor-menu.visible { display: block; }
+
+    .monitor-item {
+      display: block;
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 9px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      margin-bottom: 6px;
+    }
+    .monitor-item:last-child { margin-bottom: 0; }
+    .monitor-item:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.08); }
+    .monitor-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+    .monitor-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    #main {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      overscroll-behavior: none;
+      overscroll-behavior-x: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+
+    #remote-video,
+    #remote-image {
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+      display: none;
+      background: #000;
+      transform-origin: center center;
+      will-change: transform;
+    }
+    #remote-video {
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #remote-video.visible,
+    #remote-image.visible { display: block; }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      padding: 32px;
+      text-align: center;
+      opacity: 1;
+      transition: opacity 180ms ease, background 180ms ease, backdrop-filter 180ms ease;
+      background: var(--overlay-strong);
+      z-index: 10;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    #overlay.passive {
+      background: linear-gradient(to bottom, rgba(8, 10, 14, 0.22), rgba(8, 10, 14, 0.48));
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+    #overlay.secure-black,
+    #overlay.secure-black-silent { background: #000; backdrop-filter: none; -webkit-backdrop-filter: none; }
+    #overlay.transition-hold { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; transition: none; pointer-events: none; }
+    #overlay.silent .overlay-icon,
+    #overlay.silent .overlay-title,
+    #overlay.silent .overlay-sub,
+    #overlay.silent .spinner,
+    #overlay.silent #error-detail,
+    #overlay.secure-black-silent .overlay-icon,
+    #overlay.secure-black-silent .overlay-title,
+    #overlay.secure-black-silent .overlay-sub,
+    #overlay.secure-black-silent .spinner,
+    #overlay.secure-black-silent #error-detail { display: none !important; }
+
+    .overlay-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 24px;
+      background: rgba(var(--accent), 0.11);
+      border: 1px solid rgba(var(--accent), 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+    .overlay-icon svg { width: 36px; height: 36px; opacity: 0.78; }
+    .overlay-title { font-size: 21px; font-weight: 800; letter-spacing: -0.3px; }
+    .overlay-sub { color: var(--muted); font-size: 13px; max-width: 440px; line-height: 1.6; }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: rgba(var(--accent), 0.9);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #error-detail {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--danger);
+      background: rgba(248,113,113,0.08);
+      border: 1px solid rgba(248,113,113,0.22);
+      border-radius: 10px;
+      padding: 10px 14px;
+      max-width: 520px;
+      word-break: break-word;
+      display: none;
+    }
+
+    /* Stats are no longer shown as a bottom bar; the same IDs live in Settings. */
+    #statsbar { display: none !important; }
+
+    .side-panel {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 360px;
+      background: rgba(17,22,29,0.98);
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      z-index: 12;
+      display: none;
+      flex-direction: column;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .side-panel.visible { display: flex; }
+    #chat-panel { right: 0; }
+    #files-panel { left: 0; }
+
+    .settings-popout {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: min(420px, calc(100vw - 36px));
+      max-height: calc(100% - 36px);
+      background: rgba(17,22,29,0.96);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 18px;
+      z-index: 90;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+    .settings-popout.visible { display: flex; }
+    .settings-popout::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(320px 180px at 85% 0%, rgba(var(--accent),0.18), transparent 62%),
+        linear-gradient(to bottom, rgba(255,255,255,0.055), transparent 45%);
+    }
+    .settings-popout > * { position: relative; z-index: 1; }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 800;
+    }
+    .panel-close {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+
+    #chat-log, #file-list {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-bubble { padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.06); }
+    .chat-bubble.tech { background: rgba(var(--accent),0.16); }
+    .chat-meta { font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+    .chat-body { white-space: pre-wrap; line-height: 1.45; }
+    .chat-compose { padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+    #chat-input, #file-path {
+      flex: 1;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 9px;
+      padding: 10px 12px;
+    }
+    #chat-send, #file-refresh, #file-upload { background: rgb(var(--accent)); color: white; border: 0; border-radius: 9px; padding: 10px 12px; cursor: pointer; }
+    .file-toolbar { padding: 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+    .file-toolbar #file-path { min-width: 0; }
+    .file-entry { padding: 10px 12px; border-radius: 9px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); cursor: pointer; display:flex; align-items:center; gap:8px; }
+    .file-entry:hover { background: rgba(255,255,255,0.07); }
+    .file-entry:active { background: rgba(var(--accent),0.18); border-color: rgba(var(--accent),0.38); transform: scale(.995); }
+    .file-entry .file-main { min-width:0; flex:1; }
+    .file-entry .file-meta { font-size: 11px; color: var(--muted); margin-top: 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .file-download { border:1px solid var(--border); background:rgba(255,255,255,.06); color:var(--text); border-radius:8px; padding:7px 9px; cursor:pointer; flex:0 0 auto; }
+    #file-mobile-status { padding:0 12px 6px; color:var(--muted); font-size:11px; min-height:18px; }
+    #file-transfer-ui { display:none; margin:0 12px 10px; padding:9px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,.04); gap:8px; align-items:center; }
+    #file-transfer-ui.visible { display:flex; }
+    #file-transfer-progress { flex:1; min-width:0; height:8px; border-radius:999px; overflow:hidden; background:rgba(255,255,255,.09); }
+    #file-transfer-progress > span { display:block; width:0%; height:100%; background:rgb(var(--accent)); transition:width 120ms linear; }
+    #file-transfer-ui button { min-height:34px; padding:0 9px; border:1px solid var(--border); border-radius:8px; background:rgba(255,255,255,.06); color:var(--text); font:inherit; font-size:11px; font-weight:700; }
+
+    .settings-body {
+      padding: 16px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .settings-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .settings-card h3 {
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .diag-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px;
+    }
+    .diag-row:last-child { border-bottom: 0; }
+    .diag-row span:first-child { color: var(--muted); }
+    .diag-row span:last-child { color: var(--text); font-weight: 700; text-align: right; word-break: break-word; }
+
+    .settings-control {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px;
+    }
+    .settings-control:last-child { border-bottom: 0; }
+    .settings-control label { color: var(--muted); }
+    .settings-select {
+      min-width: 150px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text);
+      border-radius: 9px;
+      padding: 7px 9px;
+      outline: none;
+    }
+    .settings-select option { background: #11161d; color: var(--text); }
+
+    #mobile-view-controls, #mobile-keyboard, #mobile-toolbar-handle, #mobile-scroll-rail, #mobile-bottom-actions, #mobile-quality-indicator { display: none; }
+    .mobile-only-action, .mobile-only-setting { display: none; }
+
+    .mobile-touch-contact {
+      position: fixed;
+      width: 36px;
+      height: 36px;
+      margin: -18px 0 0 -18px;
+      border: 2px solid rgba(255,255,255,.92);
+      border-radius: 50%;
+      background: rgba(255,255,255,.14);
+      box-shadow: 0 0 0 5px rgba(99,102,241,.24), 0 4px 14px rgba(0,0,0,.35);
+      pointer-events: none;
+      z-index: 160;
+      transform: scale(.72);
+      opacity: 0;
+      animation: mobile-touch-pulse 420ms ease-out forwards;
+    }
+    @keyframes mobile-touch-pulse {
+      0% { opacity: .96; transform: scale(.72); }
+      55% { opacity: .72; transform: scale(1); }
+      100% { opacity: 0; transform: scale(1.28); }
+    }
+
+    #mobile-pointer-reticle {
+      position: fixed;
+      width: 30px;
+      height: 30px;
+      margin: -15px 0 0 -15px;
+      border: 2px solid rgba(255,255,255,.96);
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px rgba(0,0,0,.58), 0 4px 12px rgba(0,0,0,.35);
+      pointer-events: none;
+      z-index: 155;
+      display: none;
+    }
+    #mobile-pointer-reticle::before, #mobile-pointer-reticle::after {
+      content: '';
+      position: absolute;
+      background: rgba(255,255,255,.96);
+    }
+    #mobile-pointer-reticle::before { left: 13px; top: -7px; width: 2px; height: 40px; }
+    #mobile-pointer-reticle::after { top: 13px; left: -7px; height: 2px; width: 40px; }
+
+    #mobile-quality-indicator { position:fixed; top:max(8px, env(safe-area-inset-top)); right:max(8px, env(safe-area-inset-right)); z-index:72; min-height:28px; padding:0 9px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:rgba(8,12,19,.88); color:var(--text); font-size:10px; font-weight:800; line-height:26px; pointer-events:auto; backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+    #mobile-quality-indicator.visible { display:block; }
+    #mobile-quality-indicator[data-quality="excellent"] { border-color:rgba(52,211,153,.55); }
+    #mobile-quality-indicator[data-quality="good"] { border-color:rgba(99,102,241,.55); }
+    #mobile-quality-indicator[data-quality="poor"], #mobile-quality-indicator[data-quality="reconnecting"] { border-color:rgba(251,191,36,.65); }
+    #mobile-quality-indicator::before, #mobile-toolbar-handle::before { content:''; position:absolute; inset:-8px; border-radius:inherit; }
+    #mobile-diagnostics-card { display:none; }
+    #mobile-diagnostics-card.visible { display:block; }
+
+    #mobile-precision-loupe {
+      position: fixed;
+      width: 92px;
+      height: 92px;
+      border: 2px solid rgba(255,255,255,.92);
+      border-radius: 50%;
+      background: #06080c;
+      box-shadow: 0 12px 30px rgba(0,0,0,.48);
+      pointer-events: none;
+      z-index: 158;
+      display: none;
+    }
+
+    @media (max-width: 820px), (pointer: coarse) {
+      body {
+        height: 100dvh;
+        min-height: 100dvh;
+      }
+      #topbar {
+        height: auto;
+        min-height: 88px;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 60;
+        padding-top: max(3px, env(safe-area-inset-top));
+        transition: transform 180ms ease, opacity 180ms ease;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: 42px auto;
+        align-items: center;
+        gap: 3px 8px;
+        padding: 3px 8px 6px;
+      }
+      .brand { grid-column: 1; grid-row: 1; }
+      .brand-mark { width: 26px; height: 26px; border-radius: 8px; }
+      #logo { font-size: 12px; }
+      #status-label { max-width: 130px; }
+      .right-actions { grid-column: 2; grid-row: 1; }
+      #device-label { display: none; }
+      #btn-disconnect { height: 32px; padding: 0 10px; }
+      .topbar-actions {
+        position: static;
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(10, minmax(0, 1fr));
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(11,15,23,.94);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+      .mobile-only-action { display: inline-flex; }
+      .mobile-only-setting { display: flex; }
+      button, select, .icon-btn, #btn-monitor, .panel-close, .file-download { min-height:44px; }
+      #mobile-bottom-actions button, #mobile-view-controls button, .remote-key { min-height:44px; }
+      #mobile-toolbar-handle { min-height:34px; }
+      .icon-btn, #btn-monitor {
+        width: 100%;
+        min-width: 0;
+        height: 34px;
+        padding: 0;
+        border-radius: 9px;
+      }
+      .side-panel {
+        top: 0;
+        bottom: 0;
+        width: 100%;
+        max-width: none;
+        z-index: 100;
+        border-left: 0;
+        border-right: 0;
+      }
+      #chat-panel, #files-panel { left: 0; right: 0; }
+      .file-toolbar { flex-wrap: wrap; }
+      .file-toolbar #file-path { flex: 1 0 100%; font-size: 16px; }
+      #file-refresh, #file-upload { flex: 1; min-height: 42px; }
+      #chat-panel .panel-head { padding-top: max(12px, env(safe-area-inset-top)); }
+      #chat-panel .chat-compose {
+        padding: 10px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+      }
+      #chat-input { min-width: 0; font-size: 16px; min-height: 44px; }
+      #chat-send { min-width: 68px; min-height: 44px; touch-action: manipulation; }
+      #main { min-height: 0; padding-bottom: 0; touch-action: none; overscroll-behavior: none; }
+      #remote-video, #remote-image { object-fit: contain; }
+      body.mobile-toolbar-collapsed #topbar {
+        transform: translateY(calc(-100% - 8px));
+        opacity: 0;
+        pointer-events: none;
+      }
+      #mobile-toolbar-handle {
+        position: fixed;
+        top: max(5px, env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 70;
+        min-width: 74px;
+        height: 28px;
+        padding: 0 12px;
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 0 0 12px 12px;
+        background: rgba(11,15,23,.92);
+        color: var(--text);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 760;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      body.mobile-toolbar-collapsed #mobile-toolbar-handle { display: block; }
+      #mobile-view-controls {
+        position: absolute;
+        right: max(8px, env(safe-area-inset-right));
+        bottom: calc(max(10px, env(safe-area-inset-bottom)) + 54px);
+        top: auto;
+        z-index: 12;
+        display: none;
+        align-items: center;
+        gap: 4px;
+        padding: 5px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(11,15,23,.90);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      #mobile-view-controls.visible { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: min(94vw, 430px); transition: opacity 160ms ease, transform 160ms ease; }
+      body.mobile-toolbar-collapsed #mobile-view-controls { opacity: 0; transform: translateY(12px); pointer-events: none; }
+      #mobile-view-controls button {
+        min-width: 38px;
+        height: 34px;
+        border: 1px solid rgba(255,255,255,.11);
+        border-radius: 9px;
+        background: rgba(255,255,255,.055);
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 750;
+      }
+      #mobile-view-controls #mobile-zoom-fit { min-width: 48px; font-size: 11px; }
+      #mobile-view-controls button.active {
+        border-color: rgba(var(--accent),.72);
+        background: rgba(var(--accent),.30);
+        color: #fff;
+      }
+      #mobile-input-mode { min-width: 64px !important; font-size: 11px !important; }
+      #mobile-pan-mode, #mobile-precision-mode { min-width: 42px !important; }
+
+      #mobile-bottom-actions {
+        position: absolute;
+        left: 50%;
+        bottom: max(8px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        z-index: 26;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 6px;
+        border: 1px solid rgba(255,255,255,.13);
+        border-radius: 13px;
+        background: rgba(8,12,19,.94);
+        box-shadow: 0 8px 24px rgba(0,0,0,.30);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+      #mobile-bottom-actions.visible { display: flex; }
+      #mobile-bottom-actions button {
+        min-height: 38px;
+        min-width: 78px;
+        padding: 0 10px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 9px;
+        background: rgba(255,255,255,.06);
+        color: var(--text);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 760;
+        touch-action: manipulation;
+      }
+      #mobile-bottom-actions button:disabled { opacity: .42; }
+      #mobile-bottom-actions button.active {
+        border-color: rgba(var(--accent),.72);
+        background: rgba(var(--accent),.30);
+        color: #fff;
+      }
+      #mobile-clipboard-status {
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 6px);
+        transform: translateX(-50%);
+        min-width: 160px;
+        max-width: 78vw;
+        min-height: 0;
+        padding: 5px 8px;
+        border-radius: 8px;
+        background: rgba(8,12,19,.92);
+        color: var(--muted);
+        font-size: 10px;
+        text-align: center;
+        pointer-events: none;
+      }
+      #mobile-clipboard-status:empty { display: none; }
+
+      #mobile-scroll-rail {
+        position: absolute;
+        top: 24%;
+        right: max(2px, env(safe-area-inset-right));
+        width: 24px;
+        height: 48%;
+        z-index: 14;
+        touch-action: none;
+        opacity: .72;
+      }
+      #mobile-scroll-rail.visible { display: block; }
+      #mobile-scroll-rail::before {
+        content: '';
+        position: absolute;
+        top: 0; bottom: 0; left: 10px;
+        width: 4px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.14);
+      }
+      #mobile-scroll-thumb {
+        position: absolute;
+        left: 7px;
+        top: 40%;
+        width: 10px;
+        height: 42px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.66);
+        box-shadow: 0 2px 8px rgba(0,0,0,.35);
+        pointer-events: none;
+      }
+
+      .mobile-keyboard-head-actions { display: flex; align-items: center; gap: 5px; }
+      .mobile-keyboard-head-actions button {
+        min-height: 28px;
+        padding: 0 8px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px;
+        background: rgba(255,255,255,.06);
+        color: var(--text);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 720;
+        touch-action: manipulation;
+      }
+      #mobile-keyboard.visible {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px);
+        flex-direction: column;
+        gap: 5px;
+        max-height: min(46dvh, 330px);
+        overflow-y: auto;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-left: 0;
+        border-right: 0;
+        background: rgba(8,12,19,.985);
+        box-shadow: 0 -12px 32px rgba(0,0,0,.28);
+        z-index: 30;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .mobile-keyboard-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 28px;
+        padding: 0 2px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 750;
+      }
+      #mobile-keyboard-close {
+        width: 30px;
+        height: 26px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(255,255,255,.05);
+        color: var(--text);
+      }
+      .mobile-text-entry {
+        display: flex;
+        align-items: stretch;
+        gap: 6px;
+        padding: 0 2px 2px;
+      }
+      #mobile-text-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 38px;
+        max-height: 86px;
+        resize: vertical;
+        border: 1px solid rgba(255,255,255,.13);
+        border-radius: 9px;
+        padding: 8px 10px;
+        background: rgba(255,255,255,.06);
+        color: var(--text);
+        font: inherit;
+        font-size: 16px;
+        outline: none;
+      }
+      #mobile-text-input:focus { border-color: rgba(var(--accent),.62); }
+      #mobile-text-send {
+        flex: 0 0 auto;
+        min-width: 62px;
+        border: 1px solid rgba(var(--accent),.55);
+        border-radius: 9px;
+        padding: 0 12px;
+        background: rgba(var(--accent),.24);
+        color: #fff;
+        font: inherit;
+        font-weight: 750;
+        touch-action: manipulation;
+      }
+      #mobile-keyboard-rows { display: grid; gap: 4px; }
+      .remote-keyboard-row { display: flex; gap: 4px; min-width: 0; }
+      .remote-key {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 34px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 7px;
+        background: rgba(255,255,255,.07);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 720;
+        touch-action: manipulation;
+      }
+      .remote-key.wide { flex: 1.45 1 0; }
+      .remote-key.space { flex: 4 1 0; }
+      .remote-key.active {
+        border-color: rgba(var(--accent),.72);
+        background: rgba(var(--accent),.28);
+        color: #fff;
+      }
+      .remote-key.layer { color: #c7d2fe; }
+    }
+
+    @media (max-width: 900px) and (orientation: landscape) {
+      #topbar { min-height: 80px; grid-template-rows: 36px auto; }
+      .brand-mark { width: 24px; height: 24px; }
+      .topbar-actions { padding: 3px; }
+      .icon-btn, #btn-monitor { height: 30px; }
+      #btn-disconnect { height: 29px; }
+      #mobile-keyboard.visible { max-height: 52dvh; }
+      #mobile-bottom-actions { gap:4px; padding:4px; }
+      #mobile-bottom-actions button { min-width:66px; min-height:40px; padding:0 7px; font-size:10px; }
+      #mobile-view-controls button { min-height:40px; }
+      .remote-key { height: 30px; font-size: 11px; }
+      .mobile-keyboard-head { min-height: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="brand">
+    <div class="brand-mark">H5</div>
+    <div>
+      <div id="logo">Hi5<span>Central</span> Viewer</div>
+      <div class="session-meta">
+        <div id="status-dot"></div>
+        <div id="status-label">Waiting for connection…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="topbar-actions" aria-label="Session actions">
+    <button id="btn-elevate" class="icon-btn" hidden disabled title="Request administrator access" aria-label="Request administrator access">🛡️<span class="label">Admin</span></button>
+    <button id="btn-files" class="icon-btn" disabled title="Files" aria-label="Files">📁<span class="label">Files</span></button>
+    <button id="btn-chat" class="icon-btn" disabled title="Chat" aria-label="Chat">💬<span class="label">Chat</span></button>
+    <button id="btn-audio" class="icon-btn" disabled title="Play remote audio" aria-label="Remote audio">🔇<span class="label">Audio</span></button>
+    <button id="btn-block-input" class="icon-btn" disabled title="Block the local user's keyboard and mouse" aria-label="Block local keyboard and mouse">🔓<span class="label">User input</span></button>
+    <button id="btn-backstage" class="icon-btn" disabled title="Backstage Desktop" aria-label="Backstage Desktop">🧰<span class="label">Backstage</span></button>
+    <button id="btn-console" class="icon-btn" disabled title="Console Desktop" aria-label="Console Desktop">🖥️<span class="label">Console</span></button>
+    <button id="btn-start-menu" class="icon-btn" disabled title="Start Menu" aria-label="Start Menu">⊞<span class="label">Start</span></button>
+    <button id="btn-cad" class="icon-btn" disabled title="Ctrl+Alt+Del" aria-label="Ctrl+Alt+Del">⌘<span class="label">CAD</span></button>
+    <button id="btn-monitor" disabled title="Monitors" aria-label="Monitors">Monitors</button>
+    <button id="btn-settings" class="icon-btn" title="About and diagnostics" aria-label="About and diagnostics">⚙<span class="label">Settings</span></button>
+    <div id="monitor-menu"></div>
+  </div>
+
+  <div class="right-actions">
+    <div id="device-label"></div>
+    <button id="btn-disconnect" disabled>Disconnect</button>
+  </div>
+</div>
+
+<div id="main">
+  <video id="remote-video" autoplay playsinline></video>
+  <audio id="remote-audio" autoplay></audio>
+  <img id="remote-image" alt="Remote desktop stream" />
+  <button id="mobile-toolbar-handle" type="button" aria-label="Show session toolbar">Controls</button>
+  <button id="mobile-quality-indicator" type="button" aria-label="Connection quality" title="Connection quality">Good</button>
+  <div id="mobile-view-controls" aria-label="Mobile remote controls">
+    <button id="mobile-input-mode" type="button" aria-label="Switch touch mode">Touch</button>
+    <button id="mobile-pan-mode" type="button" aria-label="Pan viewport" title="Pan viewport">✋</button>
+    <button id="mobile-precision-mode" type="button" aria-label="Precision targeting" title="Precision targeting">⌖</button>
+    <button id="mobile-zoom-out" type="button" aria-label="Zoom out">−</button>
+    <button id="mobile-zoom-fit" type="button">Fit</button>
+    <button id="mobile-zoom-in" type="button" aria-label="Zoom in">+</button>
+  </div>
+  <div id="mobile-bottom-actions" aria-label="Mobile keyboard and clipboard controls">
+    <button id="btn-keyboard" class="mobile-bottom-btn" disabled type="button" aria-label="Remote keyboard">⌨ Keyboard</button>
+    <button id="mobile-clipboard-paste" type="button" disabled>Paste</button>
+    <button id="mobile-clipboard-copy" type="button" disabled>Copy remote</button>
+    <div id="mobile-clipboard-status" aria-live="polite"></div>
+  </div>
+  <div id="mobile-scroll-rail" aria-label="Remote scroll area"><div id="mobile-scroll-thumb"></div></div>
+  <div id="mobile-pointer-reticle" aria-hidden="true"></div>
+  <canvas id="mobile-precision-loupe" width="184" height="184" aria-hidden="true"></canvas>
+
+  <div id="files-panel" class="side-panel">
+    <div class="panel-head">
+      <span>Remote files</span>
+      <button id="files-close" class="panel-close">Close</button>
+    </div>
+    <div class="file-toolbar">
+      <input id="file-path" value="/" />
+      <button id="file-refresh">Open</button>
+      <button id="file-upload" type="button">Upload</button>
+      <input id="file-upload-input" type="file" multiple hidden />
+    </div>
+    <div id="file-mobile-status" aria-live="polite"></div>
+    <div id="file-transfer-ui" aria-live="polite">
+      <div id="file-transfer-progress"><span></span></div>
+      <button id="file-transfer-cancel" type="button">Cancel</button>
+      <button id="file-transfer-retry" type="button" style="display:none">Retry</button>
+    </div>
+    <div id="file-list"></div>
+  </div>
+
+  <div id="chat-panel" class="side-panel">
+    <div class="panel-head">
+      <span>Session chat</span>
+      <button id="chat-close" class="panel-close">Close</button>
+    </div>
+    <div id="chat-log"></div>
+    <div class="chat-compose">
+      <input id="chat-input" placeholder="Send a message to the remote user" />
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+
+  <div id="settings-panel" class="settings-popout" role="dialog" aria-modal="false" aria-label="About and diagnostics">
+    <div class="panel-head">
+      <span>About & diagnostics</span>
+      <button id="settings-close" class="panel-close" title="Close" aria-label="Close settings">×</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-card">
+        <h3>Display</h3>
+        <div class="settings-control">
+          <label for="viewer-scale-mode">Viewer scale</label>
+          <select id="viewer-scale-mode" class="settings-select">
+            <option value="stretch">Stretch to window</option>
+            <option value="fit">Fit to window</option>
+          </select>
+        </div>
+        <div class="settings-control">
+          <label for="remote-resolution-pref">Remote resolution</label>
+          <select id="remote-resolution-pref" class="settings-select">
+            <option value="auto">Auto</option>
+            <option value="native">Native</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p (performance)</option>
+          </select>
+        </div>
+        <div class="settings-control mobile-only-setting">
+          <label for="mobile-input-pref">Mobile input</label>
+          <select id="mobile-input-pref" class="settings-select">
+            <option value="direct">Direct touch</option>
+            <option value="trackpad">Trackpad</option>
+          </select>
+        </div>
+        <div class="settings-control mobile-only-setting">
+          <label for="mobile-adaptive-pref">Adaptive quality</label>
+          <select id="mobile-adaptive-pref" class="settings-select"><option value="on">On</option><option value="off">Off</option></select>
+        </div>
+        <div class="settings-control mobile-only-setting">
+          <label for="mobile-diagnostics-pref">Mobile diagnostics</label>
+          <select id="mobile-diagnostics-pref" class="settings-select"><option value="off">Off</option><option value="on">On</option></select>
+        </div>
+        <div class="settings-control mobile-only-setting">
+          <label for="mobile-toolbar-pref">Mobile toolbar</label>
+          <select id="mobile-toolbar-pref" class="settings-select">
+            <option value="auto">Auto hide</option>
+            <option value="always">Always visible</option>
+          </select>
+        </div>
+      </div>
+      <div class="settings-card">
+        <h3>Session</h3>
+        <div class="diag-row"><span>Resolution</span><span id="stat-res">—</span></div>
+        <div class="diag-row"><span>Codec</span><span id="stat-codec">VP8</span></div>
+        <div class="diag-row"><span>State</span><span id="stat-state">—</span></div>
+      </div>
+      <div class="settings-card">
+        <h3>WebRTC</h3>
+        <div class="diag-row"><span>ICE state</span><span id="diag-ice-state">—</span></div>
+        <div class="diag-row"><span>Connection state</span><span id="diag-connection-state">—</span></div>
+        <div class="diag-row"><span>Candidate pair</span><span id="diag-candidate-pair">—</span></div>
+        <div class="diag-row"><span>Bitrate</span><span id="diag-bitrate">—</span></div>
+        <div class="diag-row"><span>FPS</span><span id="diag-fps">—</span></div>
+        <div class="diag-row"><span>Frames decoded</span><span id="diag-frames">—</span></div>
+        <div class="diag-row"><span>Packets lost</span><span id="diag-packets-lost">—</span></div>
+        <div class="diag-row"><span>RTT</span><span id="diag-rtt">—</span></div>
+        <div class="diag-row"><span>ICE servers</span><span id="diag-ice-servers">—</span></div>
+      </div>
+      <div id="mobile-diagnostics-card" class="settings-card">
+        <h3>Mobile diagnostics</h3>
+        <div class="diag-row"><span>Quality</span><span id="diag-mobile-quality">—</span></div>
+        <div class="diag-row"><span>Adaptive profile</span><span id="diag-mobile-profile">—</span></div>
+        <div class="diag-row"><span>Recovery</span><span id="diag-mobile-recovery">Idle</span></div>
+        <div class="diag-row"><span>Viewport</span><span id="diag-mobile-viewport">—</span></div>
+        <div class="diag-row"><span>Selected monitor</span><span id="diag-mobile-monitor">—</span></div>
+        <div class="diag-row"><span>Wake lock</span><span id="diag-mobile-wakelock">—</span></div>
+      </div>
+      <div class="settings-card">
+        <h3>Hi5Central Viewer</h3>
+        <div class="diag-row"><span>Build</span><span>Development</span></div>
+        <div class="diag-row"><span>Mode</span><span>WebRTC VP8</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div class="overlay-icon">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+    </div>
+    <div class="overlay-title" id="overlay-title">Hi5Central Viewer</div>
+    <div class="overlay-sub" id="overlay-sub">
+      Launch this app from Hi5Central to start a remote desktop session.
+    </div>
+    <div class="spinner" id="spinner" style="display:none"></div>
+    <div id="error-detail"></div>
+  </div>
+</div>
+
+<section id="mobile-keyboard" aria-label="Remote keyboard">
+  <div class="mobile-keyboard-head"><span>Remote keyboard</span><div class="mobile-keyboard-head-actions"><button id="mobile-keyboard-close" type="button" aria-label="Close keyboard">✕</button></div></div>
+  <div class="mobile-text-entry">
+    <textarea id="mobile-text-input" rows="1" inputmode="text" enterkeyhint="send" autocapitalize="sentences" autocomplete="off" spellcheck="false" placeholder="Paste or enter text"></textarea>
+    <button id="mobile-text-send" type="button">Send</button>
+  </div>
+  <div id="mobile-keyboard-rows"></div>
+</section>
+
+<div id="statsbar"></div>
+
+<script src="renderer.js?v=20260927-connect-seamless-login"></script>
+<script src="browser.js?v=20260927-connect-seamless-login"></script>
+</body>
+</html>
