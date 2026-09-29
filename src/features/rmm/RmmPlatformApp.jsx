@@ -159,7 +159,7 @@ function itsmRecordHref(ticket) {
   const path = `/${recordPrefix(ticket)}/${encodeURIComponent(ticket.id)}`
   const surface = resolveTenantSurface()
   const deployment = deploymentConfig()
-  if (deployment.tenancyMode === 'single') return path
+  if (deployment.tenancyMode === 'single') return deployment.appUrl ? `${deployment.appUrl}${path}` : path
   if (surface?.canonical && surface?.tenantSlug) {
     return `https://${surface.tenantSlug}.${deployment.rootDomain}${path}`
   }
@@ -177,7 +177,8 @@ function securityTone(value = '') {
 function RmmSidebar({ activeView, canAudit = false, canRemote = false, mobileOpen, navigate, onClose, tenantName }) {
   const visibleNavigation = navigation.filter((item) => (!item.requiresAudit || canAudit) && (!item.requiresRemote || canRemote))
   const sections = [...new Set(visibleNavigation.map((item) => item.section))]
-  return <><button className={`rmm-sidebar-backdrop ${mobileOpen ? 'is-open' : ''}`} aria-label="Close navigation" onClick={onClose} type="button" /><aside className={`rmm-sidebar ${mobileOpen ? 'mobile-open' : ''}`}><div className="rmm-sidebar-brand"><img src={`${import.meta.env.BASE_URL}hi5central-logo.png`} alt="Hi5Central" /><div><strong>{tenantName}</strong><span>RMM</span></div><button className="rmm-mobile-close" onClick={onClose} type="button"><X size={19} /></button></div><nav className="rmm-nav">{sections.map((section) => <div className="rmm-nav-section" key={section}><span>{section}</span>{visibleNavigation.filter((item) => item.section === section).map(({ id, label, icon: Icon }) => <button className={activeView === id ? 'active' : ''} key={id} onClick={() => navigate(id)} type="button"><Icon size={17} /><span>{label}</span>{id === 'alerts' && <b>{rmmAlerts.filter((alert) => alert.status === 'Open').length}</b>}</button>)}</div>)}</nav><div className="rmm-sidebar-footer"><div><span>HC</span><div><strong>Hi5Central</strong><small>Microsoft-connected estate</small></div></div></div></aside></>
+  const platform = deploymentConfig()
+  return <><button className={`rmm-sidebar-backdrop ${mobileOpen ? 'is-open' : ''}`} aria-label="Close navigation" onClick={onClose} type="button" /><aside className={`rmm-sidebar ${mobileOpen ? 'mobile-open' : ''}`}><div className="rmm-sidebar-brand"><img src={`${import.meta.env.BASE_URL}hi5central-logo.png`} alt="Hi5Central" /><div><strong>{tenantName}</strong><span>RMM</span></div><button className="rmm-mobile-close" onClick={onClose} type="button"><X size={19} /></button></div><nav className="rmm-nav">{sections.map((section) => <div className="rmm-nav-section" key={section}><span>{section}</span>{visibleNavigation.filter((item) => item.section === section).map(({ id, label, icon: Icon }) => <button className={activeView === id ? 'active' : ''} key={id} onClick={() => navigate(id)} type="button"><Icon size={17} /><span>{label}</span>{id === 'alerts' && <b>{rmmAlerts.filter((alert) => alert.status === 'Open').length}</b>}</button>)}</div>)}</nav><div className="rmm-sidebar-footer"><div className="rmm-product-switches">{platform.appUrl ? <a href={platform.appUrl}>ITSM</a> : null}{platform.adminUrl ? <a href={platform.adminUrl}>Admin</a> : null}</div><div><span>HC</span><div><strong>Hi5Central</strong><small>Microsoft-connected estate</small></div></div></div></aside></>
 }
 
 function RmmPageSkeleton() {
