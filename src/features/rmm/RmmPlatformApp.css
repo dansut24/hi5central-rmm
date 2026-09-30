@@ -1868,3 +1868,20 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
   .rmm-bitlocker-escrow-callout { align-items: stretch; flex-direction: column; }
   .rmm-bitlocker-escrow-callout button { width: 100%; justify-content: center; }
 }
+
+.hi5-env-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+.hi5-env-dev { color: #536176; background: #f0f3f8; }
+.hi5-env-test { color: #7c3aed; background: #f5f0ff; }
+.hi5-env-uat { color: #b45309; background: #fff6e5; }
