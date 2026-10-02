@@ -70,7 +70,7 @@ import { RmmAgentDeployment } from './RmmAgentDeployment.jsx'
 import { RmmAutomation } from './RmmAutomationWorkspace.jsx'
 import { RmmConnect } from './RmmConnect.jsx'
 import { DeviceActivityTimeline, DeviceJobsPanel, RmmAuditActivity, prefetchDeviceHistory } from './RmmActivityViews.jsx'
-import { detectRemoteViewerClient } from './remoteViewerClient.js'
+import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerPlatformLabel } from './remoteViewerClient.js'
 import { RmmDeviceToolWorkspace } from './RmmDeviceTools.jsx'
 import './RmmPlatformApp.css'
 
@@ -1656,6 +1656,31 @@ function DeviceItsm({ relatedTickets, onCreateIncident }) {
   )
 }
 
+function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
+  if (!prompt) return null
+  const platformLabel = remoteViewerPlatformLabel(prompt.platform)
+  const hasDownload = Boolean(prompt.downloadUrl)
+  return <div className="rmm-viewer-install-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.() }}>
+    <section aria-labelledby="rmm-viewer-install-title" aria-modal="true" className="rmm-viewer-install-dialog" role="dialog">
+      <button aria-label="Close" className="rmm-viewer-install-close" onClick={onClose} type="button"><X size={18} /></button>
+      <span className="rmm-viewer-install-icon"><Monitor size={24} /></span>
+      <span className="rmm-eyebrow">Remote desktop</span>
+      <h2 id="rmm-viewer-install-title">Hi5Central Viewer wasn’t detected</h2>
+      <p>Remote desktop on {platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.</p>
+      <div className="rmm-viewer-install-steps">
+        <span><b>1</b><span><strong>Install Hi5Central Viewer</strong><small>{platformLabel === 'macOS' ? 'Open the DMG and move Hi5Central Viewer to Applications.' : platformLabel === 'Linux' ? 'Install the DEB package using your software installer.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
+        <span><b>2</b><span><strong>Open this session again</strong><small>The existing secure remote-session link will be reused; another session does not need to be created.</small></span></span>
+      </div>
+      <div className="rmm-viewer-install-actions">
+        {hasDownload ? <a className="rmm-primary compact" href={prompt.downloadUrl} rel="noreferrer"><Download size={16} /> Download for {platformLabel}</a> : null}
+        <button onClick={onRetry} type="button"><ExternalLink size={16} /> I’ve installed it — open Viewer</button>
+      </div>
+      {!hasDownload ? <small className="rmm-viewer-install-warning">A Viewer download has not been published for this desktop platform yet. You can retry if it is already installed.</small> : null}
+      <small className="rmm-viewer-install-note">Your browser cannot directly confirm whether a custom desktop protocol is installed, so Hi5Central shows this prompt only when the Viewer launch does not take focus.</small>
+    </section>
+  </div>
+}
+
 function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device, initialSection = 'overview', initialTool = '', onBack, onDeviceRoute, navigate, onCreateIncident, tickets = [] }) {
   const [section, setSection] = useState(initialSection || 'overview')
   const hasLiveAgent = Boolean(device.agentDeviceId)
@@ -1666,6 +1691,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   const [remoteState, setRemoteState] = useState('')
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [remoteBusyMode, setRemoteBusyMode] = useState('')
+  const [viewerInstallPrompt, setViewerInstallPrompt] = useState(null)
   const [powerBusy, setPowerBusy] = useState(false)
   const [monitoringResolution, setMonitoringResolution] = useState(null)
   const [patchPolicyResolution, setPatchPolicyResolution] = useState(null)
@@ -1749,6 +1775,35 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     onCreateIncident?.({ device, alert })
   }
 
+  async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform }) {
+    setRemoteState('Opening Hi5Central Viewer…')
+    const opened = await launchRemoteViewerProtocol(nativeUrl)
+    if (opened) {
+      setViewerInstallPrompt(null)
+      setRemoteState('Hi5Central Viewer opened.')
+      return true
+    }
+
+    setViewerInstallPrompt({
+      nativeUrl,
+      downloadUrl: viewerDownloadUrl || '',
+      platform: viewerPlatform || detectRemoteViewerClient().platform,
+    })
+    setRemoteState('Hi5Central Viewer was not detected. Install it to continue this remote session.')
+    return false
+  }
+
+  async function retryNativeViewer() {
+    if (!viewerInstallPrompt?.nativeUrl) return
+    const current = viewerInstallPrompt
+    setViewerInstallPrompt(null)
+    await openNativeViewer({
+      nativeUrl: current.nativeUrl,
+      viewerDownloadUrl: current.downloadUrl,
+      viewerPlatform: current.platform,
+    })
+  }
+
   async function startRemote(mode = 'console') {
     if (!hasLiveAgent) {
       setRemoteState('Remote tools require the Hi5Central Agent on this device.')
@@ -1768,6 +1823,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     }
     setRemoteBusy(true)
     setRemoteBusyMode(mode)
+    setViewerInstallPrompt(null)
     setRemoteState(mode === 'backstage' ? 'Starting Background session…' : 'Starting remote desktop…')
     try {
       const viewerTarget = detectRemoteViewerClient()
@@ -1781,15 +1837,25 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           viewerClient: viewerTarget.viewerClient,
           viewerDeviceClass: viewerTarget.deviceClass,
           viewerDetection: viewerTarget.reason,
+          viewerPlatform: viewerTarget.platform,
         }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'Unable to start remote session.')
       const launchUrl = payload.browserUrl || payload.nativeUrl
       if (!launchUrl) throw new Error('The remote session was created but no viewer launch URL was returned.')
-      setRemoteState(mode === 'backstage' ? 'Background session ready.' : 'Remote session ready.')
-      if (payload.browserUrl) window.open(payload.browserUrl, '_blank', 'noopener,noreferrer')
-      else window.location.href = payload.nativeUrl
+
+      if (payload.browserUrl) {
+        setRemoteState(mode === 'backstage' ? 'Background session ready.' : 'Remote session ready.')
+        window.open(payload.browserUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+
+      await openNativeViewer({
+        nativeUrl: payload.nativeUrl,
+        viewerDownloadUrl: payload.viewerDownloadUrl,
+        viewerPlatform: payload.viewerPlatform || viewerTarget.platform,
+      })
     } catch (error) {
       setRemoteState(error?.message || 'Unable to start remote session.')
     } finally {
@@ -1885,6 +1951,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       </nav>
 
       <div className={'rmm-device-section ' + (section === 'tools' ? 'is-tools' : '')}>{content}</div>
+      <ViewerInstallPrompt prompt={viewerInstallPrompt} onClose={() => setViewerInstallPrompt(null)} onRetry={retryNativeViewer} />
     </div>
   )
 }
