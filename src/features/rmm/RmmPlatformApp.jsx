@@ -1668,6 +1668,7 @@ function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
     prompt.downloadUrl || remoteViewerDownloadUrl(prompt.platform, runtimeConfig.downloadsUrl)
   const hasDownload = Boolean(downloadUrl)
   const isUpdate = prompt.kind === 'update'
+  const isSetup = prompt.kind === 'setup'
   const versionText = prompt.installedVersion
     ? `Installed ${prompt.installedVersion} · current ${prompt.requiredVersion || 'newer version'}`
     : prompt.requiredVersion
@@ -1678,18 +1679,18 @@ function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
       <button aria-label="Close" className="rmm-viewer-install-close" onClick={onClose} type="button"><X size={18} /></button>
       <span className="rmm-viewer-install-icon"><Monitor size={24} /></span>
       <span className="rmm-eyebrow">Remote desktop</span>
-      <h2 id="rmm-viewer-install-title">{isUpdate ? 'Update Hi5Central Viewer' : 'Hi5Central Viewer wasn’t detected'}</h2>
-      <p>{isUpdate ? `${versionText} Update the Viewer on ${platformLabel}, then reopen this same remote session.` : `Remote desktop on ${platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.`}</p>
+      <h2 id="rmm-viewer-install-title">{isUpdate ? 'Update Hi5Central Viewer' : isSetup ? 'Hi5Central Viewer required' : 'Hi5Central Viewer wasn’t detected'}</h2>
+      <p>{isUpdate ? `${versionText} Update the Viewer on ${platformLabel}, then reopen this same remote session.` : isSetup ? `Remote desktop on ${platformLabel} uses the native Hi5Central Viewer. Install it if needed, or open it now if it is already installed.` : `Remote desktop on ${platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.`}</p>
       <div className="rmm-viewer-install-steps">
         <span><b>1</b><span><strong>{isUpdate ? 'Update Hi5Central Viewer' : 'Install Hi5Central Viewer'}</strong><small>{platformLabel === 'macOS' ? 'Open the DMG, replace Hi5Central Viewer in Applications, then open it once.' : platformLabel === 'Linux' ? 'Install the DEB package; APT will upgrade the existing Viewer automatically.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
         <span><b>2</b><span><strong>Open this session again</strong><small>The existing secure remote-session link will be reused; another session does not need to be created.</small></span></span>
       </div>
       <div className="rmm-viewer-install-actions">
         {hasDownload ? <a className="rmm-primary compact" href={downloadUrl} target="_blank" rel="noreferrer"><Download size={16} /> {isUpdate ? 'Download update' : 'Download'} for {platformLabel}</a> : null}
-        <button onClick={onRetry} type="button"><ExternalLink size={16} /> {isUpdate ? 'I’ve updated it — open Viewer' : 'I’ve installed it — open Viewer'}</button>
+        <button onClick={onRetry} type="button"><ExternalLink size={16} /> {isUpdate ? 'I’ve updated it — open Viewer' : isSetup ? 'I already have it — open Viewer' : 'I’ve installed it — open Viewer'}</button>
       </div>
       {!hasDownload ? <small className="rmm-viewer-install-warning">A Viewer download has not been published for this desktop platform yet. You can retry if it is already installed.</small> : null}
-      <small className="rmm-viewer-install-note">{isUpdate ? 'Hi5Central checks the version reported by the native Viewer after it launches.' : 'Your browser cannot directly confirm whether a custom desktop protocol is installed, so Hi5Central shows this prompt only when the Viewer launch does not take focus.'}</small>
+      <small className="rmm-viewer-install-note">{isUpdate ? 'Hi5Central checks the version reported by the native Viewer after it launches.' : isSetup ? 'Safari cannot safely check whether a custom desktop protocol is installed without trying to open it, so Hi5Central confirms setup first on this Mac.' : 'Your browser cannot directly confirm whether a custom desktop protocol is installed, so Hi5Central shows this prompt only when the Viewer launch does not take focus.'}</small>
     </section>
   </div>
 }
@@ -1788,7 +1789,25 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     onCreateIncident?.({ device, alert })
   }
 
-  async function verifyNativeViewerVersion({ sessionId, nativeUrl, viewerDownloadUrl, viewerPlatform, requiredVersion }) {
+  function viewerVerifiedStorageKey(platform) {
+    return 'hi5central.native-viewer.verified.' + String(platform || 'unknown')
+  }
+
+  function nativeViewerPreviouslyVerified(platform) {
+    try {
+      return window.localStorage.getItem(viewerVerifiedStorageKey(platform)) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  function rememberNativeViewerVerified(platform) {
+    try {
+      window.localStorage.setItem(viewerVerifiedStorageKey(platform), '1')
+    } catch {}
+  }
+
+    async function verifyNativeViewerVersion({ sessionId, nativeUrl, viewerDownloadUrl, viewerPlatform, requiredVersion }) {
     if (!sessionId || !requiredVersion) return
     for (let attempt = 0; attempt < 10; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 350))
@@ -1803,6 +1822,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
         const connected = Boolean(session.viewer_connected_at || session.viewerConnectedAt || ['viewer_connected', 'active'].includes(session.status))
         if (!connected) continue
         const installedVersion = session.viewerVersion || ''
+        rememberNativeViewerVerified(viewerPlatform)
         if (viewerVersionNeedsUpdate(installedVersion, requiredVersion)) {
           setViewerInstallPrompt({
             kind: 'update',
@@ -1826,9 +1846,28 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     }
   }
 
-  async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform, sessionId, requiredVersion }) {
-    setRemoteState('Opening Hi5Central Viewer…')
+  async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform, sessionId, requiredVersion, forceLaunch = false }) {
     const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
+
+    // Safari shows its own "address is invalid" alert when an unregistered
+    // custom scheme is attempted. On first use, avoid probing the scheme and
+    // present the Mac setup/download choice directly. A successful native
+    // Viewer connection marks this browser so future sessions can launch
+    // directly while still checking the reported Viewer version.
+    if (resolvedPlatform === 'macos' && !forceLaunch && !nativeViewerPreviouslyVerified('macos')) {
+      setViewerInstallPrompt({
+        kind: 'setup',
+        nativeUrl,
+        downloadUrl: viewerDownloadUrl || '',
+        platform: resolvedPlatform,
+        sessionId,
+        requiredVersion,
+      })
+      setRemoteState('Hi5Central Viewer setup is required on this Mac.')
+      return false
+    }
+
+    setRemoteState('Opening Hi5Central Viewer…')
 
     // Start the version check independently of browser focus/visibility
     // heuristics. Firefox and some Linux desktop environments can launch a
@@ -1869,6 +1908,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       viewerPlatform: current.platform,
       sessionId: current.sessionId,
       requiredVersion: current.requiredVersion,
+      forceLaunch: true,
     })
   }
 
