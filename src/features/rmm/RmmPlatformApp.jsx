@@ -405,7 +405,9 @@ function networkLinePoints(samples, key) {
 }
 
 function AgentMaintenance({ device }) {
-  const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const runtimeConfig = deploymentConfig()
+  const apiBase = window.__HI5_API_BASE__ || runtimeConfig.apiUrl
+  const viewerDownloadsUrl = runtimeConfig.downloadsUrl
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(Boolean(device.agentDeviceId))
   const [busy, setBusy] = useState(false)
@@ -1661,7 +1663,10 @@ function DeviceItsm({ relatedTickets, onCreateIncident }) {
 function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
   if (!prompt) return null
   const platformLabel = remoteViewerPlatformLabel(prompt.platform)
-  const hasDownload = Boolean(prompt.downloadUrl)
+  const runtimeConfig = deploymentConfig()
+  const downloadUrl =
+    prompt.downloadUrl || remoteViewerDownloadUrl(prompt.platform, runtimeConfig.downloadsUrl)
+  const hasDownload = Boolean(downloadUrl)
   return <div className="rmm-viewer-install-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.() }}>
     <section aria-labelledby="rmm-viewer-install-title" aria-modal="true" className="rmm-viewer-install-dialog" role="dialog">
       <button aria-label="Close" className="rmm-viewer-install-close" onClick={onClose} type="button"><X size={18} /></button>
@@ -1674,7 +1679,7 @@ function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
         <span><b>2</b><span><strong>Open this session again</strong><small>The existing secure remote-session link will be reused; another session does not need to be created.</small></span></span>
       </div>
       <div className="rmm-viewer-install-actions">
-        {hasDownload ? <a className="rmm-primary compact" href={prompt.downloadUrl} target="_blank" rel="noreferrer"><Download size={16} /> Download for {platformLabel}</a> : null}
+        {hasDownload ? <a className="rmm-primary compact" href={downloadUrl} target="_blank" rel="noreferrer"><Download size={16} /> Download for {platformLabel}</a> : null}
         <button onClick={onRetry} type="button"><ExternalLink size={16} /> I’ve installed it — open Viewer</button>
       </div>
       {!hasDownload ? <small className="rmm-viewer-install-warning">A Viewer download has not been published for this desktop platform yet. You can retry if it is already installed.</small> : null}
