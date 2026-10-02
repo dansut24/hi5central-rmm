@@ -114,13 +114,17 @@ export function remoteViewerDownloadUrl(platform = '', downloadsUrl = '') {
 
 
 export function compareViewerVersions(left = '', right = '') {
-  const parse = (value) => String(value || '')
-    .trim()
-    .replace(/^v/i, '')
-    .split(/[.+-]/)[0]
-    .split('.')
-    .slice(0, 4)
-    .map((part) => Number.parseInt(part, 10) || 0)
+  const parse = (value) => {
+    const normalized = String(value || '')
+      .trim()
+      .replace(/^v/i, '')
+      .split(/[+-]/, 1)[0]
+
+    return normalized
+      .split('.')
+      .slice(0, 4)
+      .map((part) => Number.parseInt(part, 10) || 0)
+  }
 
   const a = parse(left)
   const b = parse(right)
