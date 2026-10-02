@@ -101,3 +101,13 @@ export function launchRemoteViewerProtocol(
     }
   })
 }
+
+
+export function remoteViewerDownloadUrl(platform = '', downloadsUrl = '') {
+  const base = String(downloadsUrl || '').trim().replace(/\/$/, '')
+  if (!base) return ''
+  if (platform === 'windows') return `${base}/viewer/latest/Hi5CentralViewerSetup.exe`
+  if (platform === 'macos') return `${base}/viewer/latest/Hi5CentralViewer-macOS.dmg`
+  if (platform === 'linux') return `${base}/viewer/latest/hi5central-viewer_amd64.deb`
+  return ''
+}
