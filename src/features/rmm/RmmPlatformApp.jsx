@@ -70,7 +70,7 @@ import { RmmAgentDeployment } from './RmmAgentDeployment.jsx'
 import { RmmAutomation } from './RmmAutomationWorkspace.jsx'
 import { RmmConnect } from './RmmConnect.jsx'
 import { DeviceActivityTimeline, DeviceJobsPanel, RmmAuditActivity, prefetchDeviceHistory } from './RmmActivityViews.jsx'
-import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerDownloadUrl, remoteViewerPlatformLabel } from './remoteViewerClient.js'
+import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerDownloadUrl, remoteViewerPlatformLabel, viewerVersionNeedsUpdate } from './remoteViewerClient.js'
 import { RmmDeviceToolWorkspace } from './RmmDeviceTools.jsx'
 import './RmmPlatformApp.css'
 
@@ -1667,23 +1667,29 @@ function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
   const downloadUrl =
     prompt.downloadUrl || remoteViewerDownloadUrl(prompt.platform, runtimeConfig.downloadsUrl)
   const hasDownload = Boolean(downloadUrl)
+  const isUpdate = prompt.kind === 'update'
+  const versionText = prompt.installedVersion
+    ? `Installed ${prompt.installedVersion} · current ${prompt.requiredVersion || 'newer version'}`
+    : prompt.requiredVersion
+      ? `A newer Viewer (${prompt.requiredVersion}) is required.`
+      : 'A newer Viewer is required.'
   return <div className="rmm-viewer-install-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.() }}>
     <section aria-labelledby="rmm-viewer-install-title" aria-modal="true" className="rmm-viewer-install-dialog" role="dialog">
       <button aria-label="Close" className="rmm-viewer-install-close" onClick={onClose} type="button"><X size={18} /></button>
       <span className="rmm-viewer-install-icon"><Monitor size={24} /></span>
       <span className="rmm-eyebrow">Remote desktop</span>
-      <h2 id="rmm-viewer-install-title">Hi5Central Viewer wasn’t detected</h2>
-      <p>Remote desktop on {platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.</p>
+      <h2 id="rmm-viewer-install-title">{isUpdate ? 'Update Hi5Central Viewer' : 'Hi5Central Viewer wasn’t detected'}</h2>
+      <p>{isUpdate ? `${versionText} Update the Viewer on ${platformLabel}, then reopen this same remote session.` : `Remote desktop on ${platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.`}</p>
       <div className="rmm-viewer-install-steps">
-        <span><b>1</b><span><strong>Install Hi5Central Viewer</strong><small>{platformLabel === 'macOS' ? 'Open the DMG, move Hi5Central Viewer to Applications, then open it once.' : platformLabel === 'Linux' ? 'Install the DEB package using your software installer.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
+        <span><b>1</b><span><strong>{isUpdate ? 'Update Hi5Central Viewer' : 'Install Hi5Central Viewer'}</strong><small>{platformLabel === 'macOS' ? 'Open the DMG, replace Hi5Central Viewer in Applications, then open it once.' : platformLabel === 'Linux' ? 'Install the DEB package; APT will upgrade the existing Viewer automatically.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
         <span><b>2</b><span><strong>Open this session again</strong><small>The existing secure remote-session link will be reused; another session does not need to be created.</small></span></span>
       </div>
       <div className="rmm-viewer-install-actions">
-        {hasDownload ? <a className="rmm-primary compact" href={downloadUrl} target="_blank" rel="noreferrer"><Download size={16} /> Download for {platformLabel}</a> : null}
-        <button onClick={onRetry} type="button"><ExternalLink size={16} /> I’ve installed it — open Viewer</button>
+        {hasDownload ? <a className="rmm-primary compact" href={downloadUrl} target="_blank" rel="noreferrer"><Download size={16} /> {isUpdate ? 'Download update' : 'Download'} for {platformLabel}</a> : null}
+        <button onClick={onRetry} type="button"><ExternalLink size={16} /> {isUpdate ? 'I’ve updated it — open Viewer' : 'I’ve installed it — open Viewer'}</button>
       </div>
       {!hasDownload ? <small className="rmm-viewer-install-warning">A Viewer download has not been published for this desktop platform yet. You can retry if it is already installed.</small> : null}
-      <small className="rmm-viewer-install-note">Your browser cannot directly confirm whether a custom desktop protocol is installed, so Hi5Central shows this prompt only when the Viewer launch does not take focus.</small>
+      <small className="rmm-viewer-install-note">{isUpdate ? 'Hi5Central checks the version reported by the native Viewer after it launches.' : 'Your browser cannot directly confirm whether a custom desktop protocol is installed, so Hi5Central shows this prompt only when the Viewer launch does not take focus.'}</small>
     </section>
   </div>
 }
@@ -1782,21 +1788,65 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     onCreateIncident?.({ device, alert })
   }
 
-  async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform }) {
+  async function verifyNativeViewerVersion({ sessionId, nativeUrl, viewerDownloadUrl, viewerPlatform, requiredVersion }) {
+    if (!sessionId || !requiredVersion) return
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 350))
+      try {
+        const response = await fetch(apiBase + '/api/v1/rmm/remote-sessions/' + encodeURIComponent(sessionId), {
+          credentials: 'include',
+          cache: 'no-store',
+        })
+        if (!response.ok) continue
+        const payload = await response.json().catch(() => ({}))
+        const session = payload.session || {}
+        const connected = Boolean(session.viewer_connected_at || session.viewerConnectedAt || ['viewer_connected', 'active'].includes(session.status))
+        if (!connected) continue
+        const installedVersion = session.viewerVersion || ''
+        if (viewerVersionNeedsUpdate(installedVersion, requiredVersion)) {
+          setViewerInstallPrompt({
+            kind: 'update',
+            nativeUrl,
+            downloadUrl: viewerDownloadUrl || '',
+            platform: viewerPlatform,
+            sessionId,
+            requiredVersion,
+            installedVersion,
+          })
+          setRemoteState(installedVersion
+            ? `Hi5Central Viewer ${installedVersion} needs updating to ${requiredVersion}.`
+            : `This Hi5Central Viewer is an older build. Update to ${requiredVersion}.`)
+        }
+        return
+      } catch {}
+    }
+  }
+
+  async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform, sessionId, requiredVersion }) {
     setRemoteState('Opening Hi5Central Viewer…')
     const opened = await launchRemoteViewerProtocol(nativeUrl)
     if (opened) {
       setViewerInstallPrompt(null)
       setRemoteState('Hi5Central Viewer opened.')
+      verifyNativeViewerVersion({
+        sessionId,
+        nativeUrl,
+        viewerDownloadUrl,
+        viewerPlatform,
+        requiredVersion,
+      }).catch(() => {})
       return true
     }
 
     const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
 
     setViewerInstallPrompt({
+      kind: 'install',
       nativeUrl,
       downloadUrl: viewerDownloadUrl || '',
       platform: resolvedPlatform,
+      sessionId,
+      requiredVersion,
     })
     setRemoteState('Hi5Central Viewer was not detected. Install it to continue this remote session.')
     return false
@@ -1810,6 +1860,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       nativeUrl: current.nativeUrl,
       viewerDownloadUrl: current.downloadUrl,
       viewerPlatform: current.platform,
+      sessionId: current.sessionId,
+      requiredVersion: current.requiredVersion,
     })
   }
 
@@ -1874,6 +1926,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
         nativeUrl: payload.nativeUrl,
         viewerDownloadUrl: payload.viewerDownloadUrl,
         viewerPlatform: nativePlatform,
+        sessionId: payload.session?.id,
+        requiredVersion: payload.viewerRequiredVersion,
       })
     } catch (error) {
       setRemoteState(error?.message || 'Unable to start remote session.')
