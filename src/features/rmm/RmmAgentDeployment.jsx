@@ -21,6 +21,131 @@ const FALLBACK_DOWNLOADS = {
 
 const PLATFORM_ORDER = ['windows', 'macos', 'linux']
 
+function crc32(text) {
+  const bytes = new TextEncoder().encode(text)
+  let crc = 0xffffffff
+  for (const byte of bytes) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function dosDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear())
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2)
+  const day = date.getDate()
+  const month = date.getMonth() + 1
+  const dosDate = ((year - 1980) << 9) | (month << 5) | day
+  return { time, date: dosDate }
+}
+
+function executableZip(fileName, content) {
+  const encoder = new TextEncoder()
+  const name = encoder.encode(fileName)
+  const data = encoder.encode(content)
+  const checksum = crc32(content)
+  const { time, date } = dosDateTime()
+  const localSize = 30 + name.length + data.length
+  const centralSize = 46 + name.length
+  const buffer = new ArrayBuffer(localSize + centralSize + 22)
+  const view = new DataView(buffer)
+  const bytes = new Uint8Array(buffer)
+  let offset = 0
+
+  const u16 = (value) => { view.setUint16(offset, value, true); offset += 2 }
+  const u32 = (value) => { view.setUint32(offset, value >>> 0, true); offset += 4 }
+  const raw = (value) => { bytes.set(value, offset); offset += value.length }
+
+  u32(0x04034b50)
+  u16(20)
+  u16(0)
+  u16(0)
+  u16(time)
+  u16(date)
+  u32(checksum)
+  u32(data.length)
+  u32(data.length)
+  u16(name.length)
+  u16(0)
+  raw(name)
+  raw(data)
+
+  const centralOffset = offset
+  u32(0x02014b50)
+  u16(0x0314)
+  u16(20)
+  u16(0)
+  u16(0)
+  u16(time)
+  u16(date)
+  u32(checksum)
+  u32(data.length)
+  u32(data.length)
+  u16(name.length)
+  u16(0)
+  u16(0)
+  u16(0)
+  u16(0)
+  u32((0o100755 << 16) >>> 0)
+  u32(0)
+  raw(name)
+
+  const centralLength = offset - centralOffset
+  u32(0x06054b50)
+  u16(0)
+  u16(0)
+  u16(1)
+  u16(1)
+  u32(centralLength)
+  u32(centralOffset)
+  u16(0)
+
+  return new Blob([buffer], { type: 'application/zip' })
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function tenantInstallerScript(platform, command) {
+  if (platform === 'macos') {
+    return `#!/bin/bash
+set -euo pipefail
+echo "Hi5Central Agent - macOS"
+echo "This installer is preconfigured for your Hi5Central tenant."
+${command}
+echo
+echo "Hi5Central Agent installed and enrolled successfully."
+echo "You can close this window."
+read -r -p "Press Return to close..." _ || true
+`
+  }
+
+  if (platform === 'linux') {
+    return `#!/usr/bin/env bash
+set -euo pipefail
+echo "Hi5Central Agent - Linux"
+echo "This installer is preconfigured for your Hi5Central tenant."
+${command}
+echo
+echo "Hi5Central Agent installed and enrolled successfully."
+read -r -p "Press Enter to close..." _ || true
+`
+  }
+
+  return ''
+}
+
 function packageState(pkg) {
   if (pkg.revoked_at) return 'Revoked'
   if (new Date(pkg.expires_at).getTime() <= Date.now()) return 'Expired'
@@ -73,6 +198,48 @@ export function RmmAgentDeployment() {
   useEffect(() => {
     load().catch((loadError) => setError(loadError.message))
   }, [])
+
+  async function downloadTenantInstaller(platform) {
+    if (!['macos', 'linux'].includes(platform)) return
+
+    setBusy(true)
+    setError('')
+    setCopied('')
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/rmm/agent/enrollment-packages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: `${platform === 'macos' ? 'macOS' : 'Linux'} one-click Agent installer`,
+          ttlMinutes: 60,
+          maxUses: 1,
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to create the tenant Agent installer.')
+
+      const command = payload.installCommands?.[platform]
+      if (!command) throw new Error('The server did not return an install command for this platform.')
+
+      const script = tenantInstallerScript(platform, command)
+      const scriptName = platform === 'macos'
+        ? 'Install Hi5Central Agent.command'
+        : 'Install Hi5Central Agent.sh'
+      const zipName = platform === 'macos'
+        ? 'Hi5CentralAgent-macOS-test2.zip'
+        : 'Hi5CentralAgent-Linux-test2.zip'
+
+      downloadBlob(executableZip(scriptName, script), zipName)
+      setIssued(payload)
+      if (payload.downloads) setDownloads((current) => ({ ...current, ...payload.downloads }))
+      await load()
+    } catch (downloadError) {
+      setError(downloadError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function createPackage() {
     setBusy(true)
@@ -157,10 +324,16 @@ export function RmmAgentDeployment() {
             <span className="rmm-eyebrow">{download.label}</span>
             <h2>Hi5Central Agent</h2>
             <p>{platformDescription(platform)}</p>
-            <a className="rmm-primary compact" href={download.url} rel="noreferrer">
-              <Download size={16} /> {platformDownloadLabel(platform)}
-            </a>
-            <small>{download.version ? `Test build ${download.version} · ` : ''}{download.url}</small>
+            {platform === 'windows'
+              ? <a className="rmm-primary compact" href={download.url} rel="noreferrer">
+                  <Download size={16} /> {platformDownloadLabel(platform)}
+                </a>
+              : <button className="rmm-primary compact" disabled={busy} onClick={() => downloadTenantInstaller(platform)} type="button">
+                  <Download size={16} /> Download tenant installer
+                </button>}
+            <small>{platform === 'windows'
+              ? download.url
+              : `Creates a one-use installer bound to the current tenant. Base build ${download.version || 'current'}.`}</small>
           </section>
         })}
 
