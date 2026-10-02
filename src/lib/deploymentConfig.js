@@ -87,6 +87,10 @@ export function deploymentConfig() {
   const rmmUrl = cleanUrl(runtime.rmmUrl || env.VITE_RMM_URL)
   const adminUrl = cleanUrl(runtime.adminUrl || env.VITE_ADMIN_URL, `https://admin.${rootDomain}`)
   const apiUrl = cleanUrl(runtime.apiUrl || env.VITE_API_URL)
+  const downloadsUrl = cleanUrl(
+    runtime.downloadsUrl || env.VITE_DOWNLOADS_URL,
+    deploymentMode === 'managed' ? `https://downloads.${rootDomain}` : '',
+  )
   const marketingUrl = cleanUrl(
     runtime.marketingUrl || env.VITE_MARKETING_URL,
     deploymentMode === 'managed' ? `https://${rootDomain}` : appUrl,
@@ -105,11 +109,13 @@ export function deploymentConfig() {
     rmmUrl,
     adminUrl,
     apiUrl,
+    downloadsUrl,
     marketingUrl,
     appOrigin: originOf(appUrl),
     portalOrigin: originOf(portalUrl),
     rmmOrigin: originOf(rmmUrl),
     adminOrigin: originOf(adminUrl),
+    downloadsOrigin: originOf(downloadsUrl),
     marketingOrigin: originOf(marketingUrl),
   })
 }
