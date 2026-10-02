@@ -1980,7 +1980,11 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
   text-decoration: none;
   cursor: pointer;
 }
-.rmm-viewer-install-actions a.rmm-primary { border-color: transparent; color: #fff; }
+.rmm-viewer-install-actions a.rmm-primary {
+  border-color: transparent;
+  background: var(--rmm-accent);
+  color: #fff;
+}
 
 @media (max-width: 640px) {
   .rmm-viewer-install-backdrop { align-items: end; padding: 0; }
