@@ -143,6 +143,28 @@ read -r -p "Press Enter to close..." _ || true
 `
   }
 
+  if (platform === 'windows') {
+    const exeUrl = FALLBACK_DOWNLOADS.windows.url
+    return `@echo off
+setlocal
+set "HI5TMP=%TEMP%\\Hi5CentralAgent-%RANDOM%"
+mkdir "%HI5TMP%" >nul 2>&1
+cd /d "%HI5TMP%"
+echo Hi5Central Agent - Windows
+echo This installer is preconfigured for your Hi5Central tenant.
+curl.exe -fL "${exeUrl}" -o Hi5CentralAgentSetup.exe
+if errorlevel 1 (
+  echo Failed to download Hi5Central Agent.
+  pause
+  exit /b 1
+)
+${command}
+echo.
+echo Hi5Central Agent installed and enrolled successfully.
+pause
+`
+  }
+
   return ''
 }
 
@@ -200,7 +222,7 @@ export function RmmAgentDeployment() {
   }, [])
 
   async function downloadTenantInstaller(platform) {
-    if (!['macos', 'linux'].includes(platform)) return
+    if (!['windows', 'macos', 'linux'].includes(platform)) return
 
     setBusy(true)
     setError('')
@@ -225,10 +247,14 @@ export function RmmAgentDeployment() {
       const script = tenantInstallerScript(platform, command)
       const scriptName = platform === 'macos'
         ? 'Install Hi5Central Agent.command'
-        : 'Install Hi5Central Agent.sh'
+        : platform === 'linux'
+          ? 'Install Hi5Central Agent.sh'
+          : 'Install Hi5Central Agent.cmd'
       const zipName = platform === 'macos'
-        ? 'Hi5CentralAgent-macOS-test2.zip'
-        : 'Hi5CentralAgent-Linux-test2.zip'
+        ? 'Hi5CentralAgent-macOS-tenant.zip'
+        : platform === 'linux'
+          ? 'Hi5CentralAgent-Linux-tenant.zip'
+          : 'Hi5CentralAgent-Windows-tenant.zip'
 
       downloadBlob(executableZip(scriptName, script), zipName)
       setIssued(payload)
@@ -324,16 +350,10 @@ export function RmmAgentDeployment() {
             <span className="rmm-eyebrow">{download.label}</span>
             <h2>Hi5Central Agent</h2>
             <p>{platformDescription(platform)}</p>
-            {platform === 'windows'
-              ? <a className="rmm-primary compact" href={download.url} rel="noreferrer">
-                  <Download size={16} /> {platformDownloadLabel(platform)}
-                </a>
-              : <button className="rmm-primary compact" disabled={busy} onClick={() => downloadTenantInstaller(platform)} type="button">
-                  <Download size={16} /> Download tenant installer
-                </button>}
-            <small>{platform === 'windows'
-              ? download.url
-              : `Creates a one-use installer bound to the current tenant. Base build ${download.version || 'current'}.`}</small>
+            <button className="rmm-primary compact" disabled={busy} onClick={() => downloadTenantInstaller(platform)} type="button">
+              <Download size={16} /> Download tenant installer
+            </button>
+            <small>{`Creates a one-use installer bound to the current tenant. Base build ${download.version || 'current'}.`}</small>
           </section>
         })}
 
