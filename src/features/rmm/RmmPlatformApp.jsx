@@ -70,7 +70,7 @@ import { RmmAgentDeployment } from './RmmAgentDeployment.jsx'
 import { RmmAutomation } from './RmmAutomationWorkspace.jsx'
 import { RmmConnect } from './RmmConnect.jsx'
 import { DeviceActivityTimeline, DeviceJobsPanel, RmmAuditActivity, prefetchDeviceHistory } from './RmmActivityViews.jsx'
-import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerPlatformLabel } from './remoteViewerClient.js'
+import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerDownloadUrl, remoteViewerPlatformLabel } from './remoteViewerClient.js'
 import { RmmDeviceToolWorkspace } from './RmmDeviceTools.jsx'
 import './RmmPlatformApp.css'
 
@@ -250,7 +250,9 @@ function RmmDashboard({ canAudit = false, devices = [], navigate, openDevice }) 
   const compliance = patchReported.length ? Math.round(patchReported.reduce((sum, device) => sum + Number(device.patchCompliance), 0) / patchReported.length) : null
   const pendingPatches = devices.reduce((sum, device) => sum + (Number.isFinite(Number(device.pendingPatches)) ? Number(device.pendingPatches) : 0), 0)
   const healthPercent = devices.length ? Math.round((healthy / devices.length) * 100) : null
-  const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const runtimeConfig = deploymentConfig()
+  const apiBase = window.__HI5_API_BASE__ || runtimeConfig.apiUrl
+  const viewerDownloadsUrl = runtimeConfig.downloadsUrl
   const [recentJobs, setRecentJobs] = useState([])
   const [recentActivity, setRecentActivity] = useState([])
   const [operationsLoading, setOperationsLoading] = useState(true)
@@ -1784,10 +1786,14 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       return true
     }
 
+    const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
+    const resolvedDownloadUrl =
+      viewerDownloadUrl || remoteViewerDownloadUrl(resolvedPlatform, viewerDownloadsUrl)
+
     setViewerInstallPrompt({
       nativeUrl,
-      downloadUrl: viewerDownloadUrl || '',
-      platform: viewerPlatform || detectRemoteViewerClient().platform,
+      downloadUrl: resolvedDownloadUrl,
+      platform: resolvedPlatform,
     })
     setRemoteState('Hi5Central Viewer was not detected. Install it to continue this remote session.')
     return false
