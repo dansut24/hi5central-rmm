@@ -111,3 +111,31 @@ export function remoteViewerDownloadUrl(platform = '', downloadsUrl = '') {
   if (platform === 'linux') return `${base}/viewer/latest/hi5central-viewer_amd64.deb`
   return ''
 }
+
+
+export function compareViewerVersions(left = '', right = '') {
+  const parse = (value) => String(value || '')
+    .trim()
+    .replace(/^v/i, '')
+    .split(/[.+-]/)[0]
+    .split('.')
+    .slice(0, 4)
+    .map((part) => Number.parseInt(part, 10) || 0)
+
+  const a = parse(left)
+  const b = parse(right)
+  const length = Math.max(a.length, b.length, 3)
+  for (let index = 0; index < length; index += 1) {
+    const av = a[index] || 0
+    const bv = b[index] || 0
+    if (av > bv) return 1
+    if (av < bv) return -1
+  }
+  return 0
+}
+
+export function viewerVersionNeedsUpdate(installed = '', required = '') {
+  if (!required) return false
+  if (!installed) return true
+  return compareViewerVersions(installed, required) < 0
+}
