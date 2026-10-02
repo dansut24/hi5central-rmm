@@ -1792,12 +1792,10 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     }
 
     const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
-    const resolvedDownloadUrl =
-      viewerDownloadUrl || remoteViewerDownloadUrl(resolvedPlatform, viewerDownloadsUrl)
 
     setViewerInstallPrompt({
       nativeUrl,
-      downloadUrl: resolvedDownloadUrl,
+      downloadUrl: viewerDownloadUrl || '',
       platform: resolvedPlatform,
     })
     setRemoteState('Hi5Central Viewer was not detected. Install it to continue this remote session.')
