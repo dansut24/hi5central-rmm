@@ -740,6 +740,9 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 .rmm-agent-error { margin-bottom: 12px; border: 1px solid rgba(218,73,91,.24); border-radius: 9px; padding: 10px 12px; background: rgba(218,73,91,.08); color: #c83f50; font-size: 9px; font-weight: 800; }
 
 .rmm-agent-issued-card { display: grid; gap: 10px; margin-bottom: 14px; }
+.rmm-agent-command-list { display: grid; gap: 12px; }
+.rmm-agent-command-group { display: grid; gap: 6px; }
+.rmm-agent-command-group > strong { font-size: 9px; }
 .rmm-agent-command { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: stretch; gap: 8px; }
 .rmm-agent-command code { overflow: auto; border-radius: 8px; padding: 11px; background: var(--rmm-soft); font-size: 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rmm-agent-command button { align-self: stretch; }
