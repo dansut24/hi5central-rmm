@@ -1868,3 +1868,106 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
   .rmm-bitlocker-escrow-callout { align-items: stretch; flex-direction: column; }
   .rmm-bitlocker-escrow-callout button { width: 100%; justify-content: center; }
 }
+
+
+/* Native Viewer install / retry prompt */
+.rmm-viewer-install-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 170;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(5, 15, 32, .52);
+  backdrop-filter: blur(5px);
+}
+.rmm-viewer-install-dialog {
+  position: relative;
+  width: min(540px, 100%);
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--rmm-border);
+  border-radius: 16px;
+  padding: 24px;
+  background: var(--rmm-surface);
+  color: var(--rmm-text);
+  box-shadow: 0 24px 70px rgba(4, 13, 30, .28);
+}
+.rmm-viewer-install-dialog h2 { margin: 0; font-size: 21px; letter-spacing: -.02em; }
+.rmm-viewer-install-dialog > p { margin: 0; color: var(--rmm-muted); font-size: 12px; line-height: 1.6; }
+.rmm-viewer-install-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--rmm-border);
+  border-radius: 9px;
+  background: var(--rmm-soft);
+  color: var(--rmm-muted);
+  cursor: pointer;
+}
+.rmm-viewer-install-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--rmm-accent) 14%, var(--rmm-surface));
+  color: var(--rmm-accent);
+}
+.rmm-viewer-install-steps { display: grid; gap: 9px; margin-top: 2px; }
+.rmm-viewer-install-steps > span {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid var(--rmm-border);
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: var(--rmm-soft);
+}
+.rmm-viewer-install-steps > span > b {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--rmm-accent);
+  color: #fff;
+  font-size: 10px;
+}
+.rmm-viewer-install-steps > span > span { display: grid; gap: 3px; }
+.rmm-viewer-install-steps strong { font-size: 11px; }
+.rmm-viewer-install-steps small,
+.rmm-viewer-install-note,
+.rmm-viewer-install-warning { color: var(--rmm-muted); font-size: 9.5px; line-height: 1.5; }
+.rmm-viewer-install-warning { color: #b36a1f; }
+.rmm-viewer-install-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.rmm-viewer-install-actions a,
+.rmm-viewer-install-actions button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--rmm-border);
+  border-radius: 8px;
+  padding: 0 13px;
+  background: var(--rmm-surface);
+  color: var(--rmm-text);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+.rmm-viewer-install-actions a.rmm-primary { border-color: transparent; color: #fff; }
+
+@media (max-width: 640px) {
+  .rmm-viewer-install-backdrop { align-items: end; padding: 0; }
+  .rmm-viewer-install-dialog { width: 100%; border-radius: 16px 16px 0 0; padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); }
+  .rmm-viewer-install-actions { display: grid; }
+}
