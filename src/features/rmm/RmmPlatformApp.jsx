@@ -1668,7 +1668,7 @@ function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
       <h2 id="rmm-viewer-install-title">Hi5Central Viewer wasn’t detected</h2>
       <p>Remote desktop on {platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.</p>
       <div className="rmm-viewer-install-steps">
-        <span><b>1</b><span><strong>Install Hi5Central Viewer</strong><small>{platformLabel === 'macOS' ? 'Open the DMG and move Hi5Central Viewer to Applications.' : platformLabel === 'Linux' ? 'Install the DEB package using your software installer.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
+        <span><b>1</b><span><strong>Install Hi5Central Viewer</strong><small>{platformLabel === 'macOS' ? 'Open the DMG, move Hi5Central Viewer to Applications, then open it once.' : platformLabel === 'Linux' ? 'Install the DEB package using your software installer.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
         <span><b>2</b><span><strong>Open this session again</strong><small>The existing secure remote-session link will be reused; another session does not need to be created.</small></span></span>
       </div>
       <div className="rmm-viewer-install-actions">
@@ -1851,10 +1851,20 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
         return
       }
 
+      const nativePlatform = payload.viewerPlatform || viewerTarget.platform
+      if (nativePlatform === 'windows') {
+        // Preserve the established Windows Viewer launch path exactly. The
+        // protocol-detection/install flow below is specifically for the newly
+        // supported macOS and Linux desktop clients.
+        setRemoteState(mode === 'backstage' ? 'Background session ready.' : 'Remote session ready.')
+        window.location.href = payload.nativeUrl
+        return
+      }
+
       await openNativeViewer({
         nativeUrl: payload.nativeUrl,
         viewerDownloadUrl: payload.viewerDownloadUrl,
-        viewerPlatform: payload.viewerPlatform || viewerTarget.platform,
+        viewerPlatform: nativePlatform,
       })
     } catch (error) {
       setRemoteState(error?.message || 'Unable to start remote session.')
