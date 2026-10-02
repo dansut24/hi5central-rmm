@@ -1665,6 +1665,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   const subnavRef = useRef(null)
   const [remoteState, setRemoteState] = useState('')
   const [remoteBusy, setRemoteBusy] = useState(false)
+  const [remoteBusyMode, setRemoteBusyMode] = useState('')
   const [powerBusy, setPowerBusy] = useState(false)
   const [monitoringResolution, setMonitoringResolution] = useState(null)
   const [patchPolicyResolution, setPatchPolicyResolution] = useState(null)
@@ -1766,6 +1767,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       return
     }
     setRemoteBusy(true)
+    setRemoteBusyMode(mode)
     setRemoteState(mode === 'backstage' ? 'Starting Background session…' : 'Starting remote desktop…')
     try {
       const viewerTarget = detectRemoteViewerClient()
@@ -1792,6 +1794,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       setRemoteState(error?.message || 'Unable to start remote session.')
     } finally {
       setRemoteBusy(false)
+      setRemoteBusyMode('')
     }
   }
 
@@ -1859,7 +1862,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           {remoteState && <small className="rmm-device-action-message">{remoteState}</small>}
         </div>
         <div className="rmm-device-actions">
-          <button className="rmm-primary compact" disabled={remoteBusy || !hasLiveAgent || !canRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canRemote ? 'Start unattended console remote session' : 'Your role does not include unattended remote access'} onClick={() => startRemote('console')} type="button"><Monitor size={16} /> {remoteBusy ? 'Starting…' : 'Remote desktop'}</button>
+          <button className="rmm-primary compact" disabled={remoteBusy || !hasLiveAgent || !canRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canRemote ? 'Start unattended console remote session' : 'Your role does not include unattended remote access'} onClick={() => startRemote('console')} type="button"><Monitor size={16} /> {remoteBusy && remoteBusyMode === 'console' ? 'Starting…' : 'Remote desktop'}</button>
+          <button disabled={remoteBusy || !hasLiveAgent || !canBackstageRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canBackstageRemote ? 'Start an isolated Background remote session' : 'Your role does not include Background remote access'} onClick={() => startRemote('backstage')} type="button"><Code2 size={16} /> {remoteBusy && remoteBusyMode === 'backstage' ? 'Starting…' : 'Background'}</button>
           <button disabled={!hasLiveAgent} title={!hasLiveAgent ? 'Hi5Central Agent required' : 'Open the full device tools workspace'} onClick={() => selectSection('tools')} type="button"><TerminalSquare size={16} /> Tools</button>
           <button disabled={!hasLiveAgent || !deviceOnline || powerBusy} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : 'Restart this device'} onClick={restartDevice} type="button"><RefreshCw size={16} /> {powerBusy ? 'Restarting…' : 'Restart'}</button>
           <button onClick={() => createIncident()} type="button"><AlertTriangle size={16} /> ITSM incident</button>
