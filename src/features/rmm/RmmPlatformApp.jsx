@@ -1816,7 +1816,11 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           setRemoteState(installedVersion
             ? `Hi5Central Viewer ${installedVersion} needs updating to ${requiredVersion}.`
             : `This Hi5Central Viewer is an older build. Update to ${requiredVersion}.`)
+          return
         }
+
+        setViewerInstallPrompt(null)
+        setRemoteState('Hi5Central Viewer opened.')
         return
       } catch {}
     }
@@ -1824,21 +1828,24 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
 
   async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform, sessionId, requiredVersion }) {
     setRemoteState('Opening Hi5Central Viewer…')
+    const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
+
+    // Start the version check independently of browser focus/visibility
+    // heuristics. Firefox and some Linux desktop environments can launch a
+    // registered custom protocol without producing a reliable blur event.
+    verifyNativeViewerVersion({
+      sessionId,
+      nativeUrl,
+      viewerDownloadUrl,
+      viewerPlatform: resolvedPlatform,
+      requiredVersion,
+    }).catch(() => {})
+
     const opened = await launchRemoteViewerProtocol(nativeUrl)
     if (opened) {
-      setViewerInstallPrompt(null)
       setRemoteState('Hi5Central Viewer opened.')
-      verifyNativeViewerVersion({
-        sessionId,
-        nativeUrl,
-        viewerDownloadUrl,
-        viewerPlatform,
-        requiredVersion,
-      }).catch(() => {})
       return true
     }
-
-    const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
 
     setViewerInstallPrompt({
       kind: 'install',
