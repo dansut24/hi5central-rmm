@@ -214,7 +214,11 @@ function TerminalTool({ device, shell, runAs = 'system' }) {
   return <div className="rmm-terminal-tool">
     <div className="rmm-tool-inline-status"><SquareTerminal size={15} /><span>{state}</span><button onClick={() => terminalRef.current?.clear()} type="button">Clear</button></div>
     <div className="rmm-xterm-host" ref={terminalHostRef} />
-    <form onSubmit={send}><span>{isUnixEndpoint(device) ? (runAs === 'root' ? '#' : '
+    <form onSubmit={send}>
+      <span>{isUnixEndpoint(device) ? (runAs === 'root' ? '#' : '$') : (shell === 'cmd' ? '>' : 'PS>')}</span>
+      <input autoCapitalize="none" autoComplete="off" autoCorrect="off" spellCheck={false} value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Enter a command…" />
+      <button type="submit">Send</button>
+    </form>
   </div>
 }
 
@@ -275,7 +279,7 @@ function FilesTool({ device, runAs = 'system' }) {
         let message
         try { message = JSON.parse(event.data) } catch { return }
         if (message.type === 'files_result') {
-          setPath(message.path || message.result?.path || 'C:\\')
+          setPath(message.path || message.result?.path || initialPath)
           setParent(message.parent || message.result?.parent || '')
           setEntries(message.entries || message.result?.entries || [])
           setDrives(message.drives || message.result?.drives || [])
