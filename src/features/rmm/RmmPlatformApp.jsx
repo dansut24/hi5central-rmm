@@ -442,6 +442,7 @@ function AgentMaintenance({ device }) {
   const releases = info?.releases || []
   const target = releases.find((release) => !release.installed) || releases[0]
   const latest = info?.latestUpgrade
+  const unixAgent = ['Linux', 'macOS'].includes(info?.device?.platform)
   const latestTargetsTarget = Boolean(target?.id && latest?.request_metadata?.release_id === target.id)
   const verified = Boolean(target?.installed)
   const running = latestTargetsTarget && ['queued', 'claimed'].includes(latest?.status)
@@ -480,17 +481,17 @@ function AgentMaintenance({ device }) {
     {loading ? <p>Loading Agent release state…</p> : <>
       <div className="rmm-agent-maintenance-meta">
         <span><small>Agent reports</small><strong>{info?.device?.agentVersion || 'Not reported'}</strong></span>
-        <span><small>PatchHost</small><strong>{info?.device?.patchHostVersion || 'Not reported'}</strong></span>
-        <span><small>Target</small><strong>{target ? target.version + ' / ' + (target.patchHostVersion || '—') : 'No release'}</strong></span>
+        <span><small>{unixAgent ? 'Platform' : 'PatchHost'}</small><strong>{unixAgent ? (info?.device?.platform || 'Unix') : (info?.device?.patchHostVersion || 'Not reported')}</strong></span>
+        <span><small>Target</small><strong>{target ? (unixAgent ? target.version : target.version + ' / ' + (target.patchHostVersion || '—')) : 'No release'}</strong></span>
       </div>
       {target?.releaseNotes && <p>{target.releaseNotes}</p>}
-      {scheduled && <div className="rmm-agent-maintenance-state running"><Clock3 size={14} /><span>Installer scheduled. Waiting for the Agent to restart and report PatchHost {target.patchHostVersion}.</span></div>}
-      {staleScheduled && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>The scheduled upgrade did not report the target Agent/PatchHost within 3 minutes. The device is still online, so you can retry the upgrade.</span></div>}
-      {verified && <div className="rmm-agent-maintenance-state healthy"><CheckCircle2 size={14} /><span>PatchHost {info?.device?.patchHostVersion} is reporting. This release is verified on the endpoint.</span></div>}
+      {scheduled && <div className="rmm-agent-maintenance-state running"><Clock3 size={14} /><span>{unixAgent ? 'Upgrade staged. Waiting for the Agent to restart and report ' + target.version + '.' : 'Installer scheduled. Waiting for the Agent to restart and report PatchHost ' + target.patchHostVersion + '.'}</span></div>}
+      {staleScheduled && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>{unixAgent ? 'The upgrade did not reconnect on the target Agent version within 3 minutes. The endpoint can be retried safely.' : 'The scheduled upgrade did not report the target Agent/PatchHost within 3 minutes. The device is still online, so you can retry the upgrade.'}</span></div>}
+      {verified && <div className="rmm-agent-maintenance-state healthy"><CheckCircle2 size={14} /><span>{unixAgent ? 'Agent ' + info?.device?.agentVersion + ' is reporting and this release is verified on the endpoint.' : 'PatchHost ' + info?.device?.patchHostVersion + ' is reporting. This release is verified on the endpoint.'}</span></div>}
       {failed && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>{latest?.error_message || 'The Agent upgrade preparation job failed.'}</span></div>}
       {error && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>{error}</span></div>}
       {!verified && <button className="rmm-primary compact" disabled={busy || running || scheduled || !target || !info?.device?.online} onClick={upgrade} type="button"><Download size={14} /> {busy ? 'Starting…' : running ? 'Preparing…' : scheduled ? 'Waiting for restart…' : !info?.device?.online ? 'Device offline' : target ? 'Upgrade to ' + target.version : 'No release available'}</button>}
-      {target?.sha256 && <small className="rmm-agent-maintenance-sha">SHA-256 {target.sha256.slice(0, 12)}…{target.sha256.slice(-12)} · {target.channel}</small>}
+      {target?.sha256 && <small className="rmm-agent-maintenance-sha">SHA-256 {target.sha256.slice(0, 12)}…{target.sha256.slice(-12)} · {target.channel}{unixAgent ? ' · rollback protected' : ''}</small>}
     </>}
   </section>
 }
