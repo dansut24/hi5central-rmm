@@ -624,7 +624,7 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 .rmm-device-section-heading p { margin: 0; color: var(--rmm-muted); font-size: 8px; }
 .rmm-device-software-table { min-width: 1040px; }
 .rmm-device-software-table .rmm-table-head,
-.rmm-device-software-table .rmm-table-row { grid-template-columns: minmax(230px,1.5fr) 120px minmax(170px,1fr) 100px 135px 95px; }
+.rmm-device-software-table .rmm-table-row { grid-template-columns: minmax(230px,1.5fr) 120px minmax(170px,1fr) 100px 135px minmax(145px,auto); }
 
 .rmm-device-patch-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-bottom: 12px; }
 .rmm-device-patch-summary > div { display: flex; align-items: center; gap: 9px; border: 1px solid var(--rmm-border); border-radius: 10px; padding: 12px; background: var(--rmm-surface); }
@@ -899,6 +899,8 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
   cursor: pointer;
 }
 .rmm-software-uninstall:disabled { opacity: .55; cursor: wait; }
+.rmm-software-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rmm-software-actions .rmm-status-pill { white-space: nowrap; }
 .rmm-software-action-state { white-space: normal !important; line-height: 1.35; }
 .rmm-software-action-state.running { color: #3d73e8 !important; }
 .rmm-software-action-state.healthy { color: #188c61 !important; }
