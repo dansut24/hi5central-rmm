@@ -1039,6 +1039,8 @@ function DeviceSoftware({ device }) {
     if (reason === 'protected_security_or_agent') return result?.detail || 'Protected Agent or security software cannot be removed here.'
     if (reason === 'password_or_vendor_protection_required') return 'The vendor requires a password, tamper-protection change or another authorised removal method.'
     if (reason === 'no_safe_silent_uninstaller_found') return 'No safe silent uninstall method was found for this application.'
+    if (reason === 'protected_system_component') return result?.detail || 'This item is classified as an operating-system component and cannot be removed here.'
+    if (reason === 'unsafe_dependency_removal') return result?.detail || 'The package manager reported that removing this application would also remove other packages, so Hi5Central blocked it.'
     if (reason === 'user_context_or_silent_uninstall_failed') return 'The application is installed for a user profile and could not be removed silently from the available user/system context.'
     if (reason === 'silent_uninstall_failed') return 'Silent uninstall methods were attempted but the application is still installed.'
     return result?.error || 'The uninstall could not be completed.'
@@ -1149,7 +1151,12 @@ function DeviceSoftware({ device }) {
   }
 
   const normalized = search.trim().toLowerCase()
-  const visibleSoftware = (device.installedSoftware || []).filter((app) => {
+  const applicationSoftware = (device.installedSoftware || []).filter((app) => app.displayInInstalledSoftware !== false)
+  const hiddenSystemComponents = Math.max(
+    Number(device.hiddenSoftwareComponents || 0),
+    (device.installedSoftware || []).length - applicationSoftware.length,
+  )
+  const visibleSoftware = applicationSoftware.filter((app) => {
     const key = softwareKey(app)
     if (removedKeys.includes(key)) return false
     return !normalized || [app.name, app.version, app.publisher, app.installLocation].join(' ').toLowerCase().includes(normalized)
@@ -1159,7 +1166,7 @@ function DeviceSoftware({ device }) {
   return (
     <section className="rmm-table-card rmm-device-software-card">
       <div className="rmm-device-section-heading">
-        <div><span className="rmm-eyebrow">Inventory</span><h2>Installed software</h2><p>{visibleSoftware.length} applications are reported by the latest real device inventory.</p></div>
+        <div><span className="rmm-eyebrow">Inventory</span><h2>Installed software</h2><p>{visibleSoftware.length} applications are reported by the latest device inventory{hiddenSystemComponents > 0 ? ` · ${hiddenSystemComponents} OS components hidden` : ''}.</p></div>
         <label className="rmm-device-inline-search"><Search size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(120) }} placeholder="Search installed software…" /></label>
       </div>
       <div className="rmm-table rmm-device-software-table">
