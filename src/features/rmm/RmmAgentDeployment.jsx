@@ -10,12 +10,12 @@ const FALLBACK_DOWNLOADS = {
   macos: {
     label: 'macOS universal',
     url: 'https://downloads.hi5central.com/agent/latest/Hi5CentralAgent-macOS-universal.tar.gz',
-    version: '0.3.11',
+    version: '0.3.22',
   },
   linux: {
     label: 'Linux x64',
     url: 'https://downloads.hi5central.com/agent/latest/Hi5CentralAgent-linux-x64.tar.gz',
-    version: '0.3.16',
+    version: '0.3.22',
   },
 }
 
