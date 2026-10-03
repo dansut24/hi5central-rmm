@@ -15,7 +15,7 @@ const FALLBACK_DOWNLOADS = {
   linux: {
     label: 'Linux x64',
     url: 'https://downloads.hi5central.com/agent/latest/Hi5CentralAgent-linux-x64.tar.gz',
-    version: '0.3.11',
+    version: '0.3.13',
   },
 }
 
