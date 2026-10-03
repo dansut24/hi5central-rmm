@@ -1009,10 +1009,13 @@ function DeviceSoftware({ device }) {
   const deviceOnline = deviceIsOnline(device)
   const [search, setSearch] = useState('')
   const [busyKey, setBusyKey] = useState('')
+  const [busyMode, setBusyMode] = useState('')
   const [removedKeys, setRemovedKeys] = useState([])
   const [resultByKey, setResultByKey] = useState({})
   const [visibleLimit, setVisibleLimit] = useState(120)
   const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const platform = String(device.platform || device.operatingSystem || device.operating_system || '').toLowerCase()
+  const unixDevice = platform.includes('linux') || platform.includes('mac')
 
   function softwareKey(app) {
     return `${app.scope || 'unknown'}:${app.registryKey || app.name}:${app.version || ''}`
@@ -1056,7 +1059,8 @@ function DeviceSoftware({ device }) {
     const key = softwareKey(app)
     if (!window.confirm(`Uninstall ${app.name} silently from ${device.name}? Hi5Central will try the vendor command first, verify removal, then try recognised silent fallbacks if needed.`)) return
     setBusyKey(key)
-    setResultByKey((current) => ({ ...current, [key]: { tone: 'running', message: 'Preparing silent uninstall…' } }))
+    setBusyMode('uninstall')
+    setResultByKey((current) => ({ ...current, [key]: { tone: 'running', message: unixDevice ? 'Preparing native uninstall…' : 'Preparing silent uninstall…' } }))
     try {
       const response = await fetch(`${apiBase}/api/v1/rmm/devices/${encodeURIComponent(device.agentDeviceId)}/actions`, {
         method: 'POST',
@@ -1064,7 +1068,14 @@ function DeviceSoftware({ device }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'software.uninstall',
-          payload: { name: app.name, registry_key: app.registryKey, scope: app.scope, user_profile: app.userProfile },
+          payload: {
+            name: app.name,
+            registry_key: app.registryKey,
+            scope: app.scope,
+            user_profile: app.userProfile,
+            package_manager: app.packageManager,
+            package_id: app.packageId,
+          },
         }),
       })
       const payload = await response.json().catch(() => ({}))
@@ -1079,6 +1090,60 @@ function DeviceSoftware({ device }) {
       setResultByKey((current) => ({ ...current, [key]: { tone: 'critical', message: error?.message || 'Uninstall failed.' } }))
     } finally {
       setBusyKey('')
+      setBusyMode('')
+    }
+  }
+
+  function updateMessage(result) {
+    if (result?.status === 'updated') return 'Updated successfully'
+    if (result?.reason === 'native_update_failed') return result?.error || 'Native package update failed.'
+    return result?.error || result?.detail || 'The update could not be completed.'
+  }
+
+  async function updateSoftware(app) {
+    if (!deviceOnline || !device.agentDeviceId || busyKey || !app.nativeActionable || !app.updateAvailable) return
+    const key = softwareKey(app)
+    const target = app.latestVersion ? ` to ${app.latestVersion}` : ''
+    if (!window.confirm(`Update ${app.name}${target} on ${device.name} using ${app.packageManager || 'its native package manager'}?`)) return
+
+    setBusyKey(key)
+    setBusyMode('update')
+    setResultByKey((current) => ({ ...current, [key]: { tone: 'running', message: 'Native package update running…' } }))
+
+    try {
+      const response = await fetch(`${apiBase}/api/v1/rmm/devices/${encodeURIComponent(device.agentDeviceId)}/actions`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'software.update',
+          payload: {
+            name: app.name,
+            registry_key: app.registryKey,
+            scope: app.scope,
+            package_manager: app.packageManager,
+            package_id: app.packageId,
+            latest_version: app.latestVersion,
+          },
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to queue the software update.')
+      const job = await waitForAction(payload.job?.id)
+      const result = job?.result || {}
+      const success = job?.status === 'completed' && result?.status === 'updated'
+      setResultByKey((current) => ({
+        ...current,
+        [key]: { tone: success ? 'healthy' : 'critical', message: updateMessage(result), result },
+      }))
+    } catch (error) {
+      setResultByKey((current) => ({
+        ...current,
+        [key]: { tone: 'critical', message: error?.message || 'Update failed.' },
+      }))
+    } finally {
+      setBusyKey('')
+      setBusyMode('')
     }
   }
 
@@ -1097,7 +1162,7 @@ function DeviceSoftware({ device }) {
         <label className="rmm-device-inline-search"><Search size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(120) }} placeholder="Search installed software…" /></label>
       </div>
       <div className="rmm-table rmm-device-software-table">
-        <div className="rmm-table-head"><span>Application</span><span>Version</span><span>Publisher</span><span>Installed</span><span>Scope / size</span><span>Removal</span></div>
+        <div className="rmm-table-head"><span>Application</span><span>Version</span><span>Publisher</span><span>Installed</span><span>Scope / size</span><span>Actions</span></div>
         {renderedSoftware.map((app) => {
           const key = softwareKey(app)
           const protectedApp = protectedSoftware(app)
@@ -1108,7 +1173,18 @@ function DeviceSoftware({ device }) {
             <span><strong>{app.publisher || 'Not reported'}</strong></span>
             <span><strong>{app.installed || 'Not reported'}</strong></span>
             <span><strong>{softwareScopeLabel(app.scope)}</strong><small>{app.estimatedSizeKb == null ? 'Size not reported' : formatBytes(Number(app.estimatedSizeKb) * 1024)}</small></span>
-            <span>{protectedApp ? <StatusPill tone="neutral">Protected</StatusPill> : !device.agentDeviceId ? <StatusPill tone="neutral">Agent required</StatusPill> : !deviceOnline ? <button className="rmm-software-uninstall" disabled title="Device is offline" type="button"><WifiOff size={13} /> Offline</button> : <button className="rmm-software-uninstall" disabled={busyKey === key} onClick={() => uninstallSoftware(app)} type="button"><Trash2 size={13} /> {busyKey === key ? 'Uninstalling…' : 'Uninstall'}</button>}</span>
+            <span className="rmm-software-actions">{protectedApp
+              ? <StatusPill tone="neutral">Protected</StatusPill>
+              : !device.agentDeviceId
+                ? <StatusPill tone="neutral">Agent required</StatusPill>
+                : unixDevice && app.nativeActionable !== true
+                  ? <StatusPill tone="neutral">Inventory only</StatusPill>
+                  : !deviceOnline
+                    ? <button className="rmm-software-uninstall" disabled title="Device is offline" type="button"><WifiOff size={13} /> Offline</button>
+                    : <>
+                        {unixDevice && app.nativeActionable === true && app.updateAvailable === true && <button className="rmm-software-uninstall" disabled={busyKey === key} onClick={() => updateSoftware(app)} type="button"><RefreshCw size={13} /> {busyKey === key && busyMode === 'update' ? 'Updating…' : 'Update'}</button>}
+                        <button className="rmm-software-uninstall" disabled={busyKey === key} onClick={() => uninstallSoftware(app)} type="button"><Trash2 size={13} /> {busyKey === key && busyMode === 'uninstall' ? 'Uninstalling…' : 'Uninstall'}</button>
+                      </>}</span>
           </div>
         })}
       </div>
