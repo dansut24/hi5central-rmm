@@ -5,8 +5,7 @@ const API_BASE = window.__HI5_API_BASE__ || ''
 
 const PLATFORM_FORMATS = {
   windows: [
-    { format: 'exe', label: 'EXE', detail: 'Interactive, scripts and software deployment' },
-    { format: 'msi', label: 'MSI', detail: 'Intune, Ivanti, GPO and managed deployment' },
+    { format: 'exe', label: 'EXE', detail: 'Single-file native installer for manual, scripted, Intune, Ivanti, GPO and managed deployment' },
   ],
   macos: [
     { format: 'pkg', label: 'PKG', detail: 'Recommended for MDM and managed deployment' },
@@ -49,9 +48,6 @@ function installCommand(pkg) {
   const format = pkg?.installer_format
   if (format === 'exe') {
     return '.\\Hi5CentralAgent.exe --quiet'
-  }
-  if (format === 'msi') {
-    return 'msiexec /i "Hi5CentralAgentDeployment-Windows.msi" /qn HI5DEPLOYMENTCONFIG="%CD%\\Hi5CentralDeployment.json"'
   }
   if (format === 'run') {
     return 'sudo ./Hi5CentralAgentDeployment-Linux.run --config ./Hi5CentralDeployment.json'
