@@ -4284,14 +4284,6 @@ async function onSignalMessage(raw) {
       break;
     }
 
-    case "session_state": {
-      const inferred = remotePlatformFromBackend(msg.backend || '');
-      if (inferred !== 'unknown' || typeof msg.clipboard_read === 'boolean') {
-        setCurrentRemotePlatform(inferred, typeof msg.clipboard_read === 'boolean' ? msg.clipboard_read : undefined);
-      }
-      break;
-    }
-
     case "start_webrtc_sent":
       break;
 
@@ -4327,6 +4319,11 @@ async function onSignalMessage(raw) {
       if (monitorMenuOpen) {
         renderMonitorMenu();
       }
+      break;
+    }
+
+    case "clipboard_result": {
+      handleViewerControlMessage(JSON.stringify(msg));
       break;
     }
 
@@ -4470,6 +4467,13 @@ async function onSignalMessage(raw) {
     }
 
     case "session_state": {
+      const inferred = remotePlatformFromBackend(msg.backend || '');
+      if (inferred !== 'unknown' || typeof msg.clipboard_read === 'boolean') {
+        setCurrentRemotePlatform(
+          inferred,
+          typeof msg.clipboard_read === 'boolean' ? msg.clipboard_read : undefined
+        );
+      }
       const state = msg.state || "";
 
       if (state === "connect_uac_customer_action_required") {
