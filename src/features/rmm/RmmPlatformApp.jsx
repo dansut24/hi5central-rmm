@@ -1830,8 +1830,16 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     device.operating_system,
   ].filter(Boolean).join(' ').toLowerCase()
   const isLinuxDevice = /linux|fedora|ubuntu|debian|rhel|centos|rocky|alma|opensuse|suse/.test(devicePlatformText)
-  const waylandPersistenceSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.151')
-  const waylandPersistenceStatusSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.153')
+  const remoteDesktop = device.inventory?.remote_desktop || device.inventory?.agent?.capabilities?.remote_desktop_capabilities || {}
+  const remoteBackend = String(remoteDesktop.backend || '').toLowerCase()
+  const remoteSessionType = String(remoteDesktop.session_type || '').toLowerCase()
+  const isWaylandDevice = isLinuxDevice && (
+    remoteBackend.includes('wayland')
+    || remoteSessionType.includes('wayland')
+    || remoteDesktop.wayland?.detected === true
+  )
+  const waylandPersistenceSupported = isWaylandDevice && agentVersionAtLeast(device.agent, '0.3.151')
+  const waylandPersistenceStatusSupported = isWaylandDevice && agentVersionAtLeast(device.agent, '0.3.153')
 
   useEffect(() => {
     prefetchDeviceHistory(device).catch(() => {})
@@ -1844,7 +1852,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   }, [device.id, initialSection, initialTool])
 
   useEffect(() => {
-    if (!isLinuxDevice) {
+    if (!isWaylandDevice) {
+      setWaylandPersistence(false)
       setWaylandPersistenceStatus({ state: 'unsupported', remembered: null, activeUser: null })
       return undefined
     }
@@ -1888,7 +1897,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       active = false
       window.removeEventListener('focus', onFocus)
     }
-  }, [apiBase, device.agent, device.agentDeviceId, device.id, deviceOnline, isLinuxDevice, waylandPersistenceStatusSupported])
+  }, [apiBase, device.agent, device.agentDeviceId, device.id, deviceOnline, isWaylandDevice, waylandPersistenceStatusSupported])
 
   useEffect(() => {
     const nav = subnavRef.current
@@ -2146,7 +2155,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   }
 
   async function forgetRememberedWaylandAccess() {
-    if (!isLinuxDevice || !device.agentDeviceId || forgetWaylandBusy) return
+    if (!isWaylandDevice || !device.agentDeviceId || forgetWaylandBusy) return
     if (!window.confirm('Forget remembered Wayland access for the currently logged-in Linux user? The next persistent remote session will require local approval again.')) return
 
     setForgetWaylandBusy(true)
@@ -2259,7 +2268,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
         </div>
       </header>
 
-      {isLinuxDevice && <section className="rmm-wayland-persistence-panel" aria-label="Wayland remote access options">
+      {isWaylandDevice && <section className="rmm-wayland-persistence-panel" aria-label="Wayland remote access options">
         <div className="rmm-wayland-persistence-copy">
           <span className="rmm-wayland-persistence-icon"><ShieldCheck size={17} /></span>
           <div>
