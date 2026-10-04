@@ -158,6 +158,31 @@ function osPolicyPlatformLabel(policy) {
   return labels.join(' · ') || 'No platforms'
 }
 
+function osScheduleTone(decision) {
+  if (decision?.action === 'install' && decision?.dispatched) return 'running'
+  if (decision?.action === 'scan' && decision?.dispatched) return 'running'
+  if (decision?.reason === 'agent_upgrade_required') return 'warning'
+  if (decision?.reason === 'device_offline') return 'neutral'
+  if (decision?.action === 'none') return 'healthy'
+  if (decision?.action === 'wait') return 'neutral'
+  return 'neutral'
+}
+
+function osScheduleLabel(decision) {
+  if (!decision) return 'Awaiting evaluation'
+  if (decision.action === 'install') return decision.dispatched ? 'Install dispatched' : 'Install eligible'
+  if (decision.action === 'scan') return decision.dispatched ? 'Scan dispatched' : 'Scan required'
+  if (decision.action === 'none') return 'Current'
+  if (decision.reason === 'outside_maintenance_window') return 'Waiting for window'
+  if (decision.reason === 'device_offline') return 'Offline'
+  if (decision.reason === 'agent_upgrade_required') return 'Agent upgrade required'
+  if (decision.reason === 'platform_not_enabled') return 'Platform excluded'
+  if (decision.reason === 'automatic_install_disabled') return 'Manual'
+  if (decision.reason === 'recent_schedule_job') return 'Job in progress'
+  if (decision.reason === 'no_os_patch_policy') return 'No policy'
+  return readinessLabel(decision.reason || decision.action || 'waiting')
+}
+
 function PageHeading({ action }) {
   return (
     <div className="rmm-page-heading">
@@ -1440,6 +1465,27 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
   const windowsUpdates = bundle?.windowsUpdates || { summary: {}, observations: [], decisions: [] }
   const windowsSummary = windowsUpdates.summary || {}
   const windowsPending = Number(windowsSummary.pending || 0)
+  const unixOsSchedules = bundle?.unixOsSchedules || []
+  const unixScheduleRows = unixOsSchedules.map((decision) => {
+    const device = patchDevices.find((item) => item.inventoryId === decision.inventoryId) || {}
+    const osUpdates = device.osUpdates || {}
+    return {
+      ...decision,
+      agentVersion: device.agentVersion || '',
+      online: device.online === true,
+      pendingCount: Number(osUpdates.pending_count || decision.pendingCount || 0),
+      securityCount: Number(osUpdates.security_count || 0),
+      lastScanUtc: osUpdates.last_scan_utc || null,
+      rebootRequired: osUpdates.reboot_required === true,
+    }
+  })
+  const linuxPending = unixScheduleRows
+    .filter((row) => row.platform === 'linux')
+    .reduce((total, row) => total + row.pendingCount, 0)
+  const macosPending = unixScheduleRows
+    .filter((row) => row.platform === 'macos')
+    .reduce((total, row) => total + row.pendingCount, 0)
+  const osPending = windowsPending + linuxPending + macosPending
   const windowsPendingRows = (windowsUpdates.observations || []).filter((item) => item.pending)
   const windowsDecisions = windowsUpdates.decisions || []
   const windowsReleases = windowsUpdates.releases || []
@@ -2100,7 +2146,7 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     {!softwareOnly && <nav className="rmm-patch-tabs">
       {[
         ['catalogue', 'Catalogue', catalogueFeed.total ?? catalogue.length],
-        ['windows', 'OS Updates', windowsPending],
+        ['windows', 'OS Updates', osPending],
         ['policies', 'Policies', policies.length],
       ].map(([id, label, count]) => <button className={tab === id ? 'active' : ''} key={id} onClick={() => setTab(id)} type="button">{label}<b>{count}</b></button>)}
     </nav>}
@@ -2302,6 +2348,27 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
         <article><small>Reboot required</small><strong>{windowsSummary.rebootRequired || 0}</strong><span>{windowsSummary.pausedReleases || 0} paused release{Number(windowsSummary.pausedReleases || 0) === 1 ? '' : 's'}</span></article>
         <article><small>Managed by Hi5Central</small><strong>{windowsSummary.managedDevices || 0}</strong><span>{windowsSummary.managementConflicts || 0} management conflict{Number(windowsSummary.managementConflicts || 0) === 1 ? '' : 's'}</span></article>
       </div>
+
+      {!!unixScheduleRows.length && <>
+        <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Linux & macOS</span><h3>Native OS update schedules</h3><p>Linux uses APT/DNF and macOS uses Apple Software Update. These endpoints follow the same assigned OS maintenance window without Windows-specific rollout rings.</p></div></div>
+        <div className="rmm-windows-summary">
+          <article><small>Linux pending</small><strong>{linuxPending}</strong><span>{unixScheduleRows.filter((row) => row.platform === 'linux').length} managed Linux device{unixScheduleRows.filter((row) => row.platform === 'linux').length === 1 ? '' : 's'}</span></article>
+          <article><small>macOS pending</small><strong>{macosPending}</strong><span>{unixScheduleRows.filter((row) => row.platform === 'macos').length} managed Mac{unixScheduleRows.filter((row) => row.platform === 'macos').length === 1 ? '' : 's'}</span></article>
+          <article><small>Unix security</small><strong>{unixScheduleRows.reduce((total, row) => total + row.securityCount, 0)}</strong><span>Native updater security classifications</span></article>
+        </div>
+        <div className="rmm-patch-table windows scheduled">
+          <div className="head"><span>Device</span><span>Platform</span><span>Pending</span><span>Policy</span><span>Schedule state</span><span>Agent</span></div>
+          {unixScheduleRows.map((row) => <div className="row" key={row.inventoryId}>
+            <span><strong>{row.deviceName || row.inventoryId}</strong><small>{row.lastScanUtc ? 'Last scan ' + new Date(row.lastScanUtc).toLocaleString() : 'OS scan not completed yet'}</small></span>
+            <span><StatusPill tone="neutral">{row.platform === 'macos' ? 'macOS' : 'Linux'}</StatusPill><small>{row.platform === 'macos' ? 'Apple Software Update' : 'APT / DNF'}</small></span>
+            <span><strong>{row.pendingCount}</strong><small>{row.securityCount} security{row.rebootRequired ? ' · reboot flagged' : ''}</small></span>
+            <span><strong>{row.policyName || 'No assigned OS policy'}</strong><small>{row.installMode === 'security_only' ? 'Security only' : 'All eligible native updates'}</small></span>
+            <span><StatusPill tone={osScheduleTone(row)}>{osScheduleLabel(row)}</StatusPill><small>{row.requiredAgentVersion ? 'Requires Agent ' + row.requiredAgentVersion + '+' : readinessLabel(row.reason || '')}</small></span>
+            <span>{row.online ? <StatusPill tone="healthy">Online</StatusPill> : <StatusPill tone="neutral"><WifiOff size={12} /> Offline</StatusPill>}<small>{row.agentVersion ? 'Agent ' + row.agentVersion : 'Agent version unknown'}</small></span>
+          </div>)}
+        </div>
+        <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>macOS major-version upgrades are deliberately excluded from automatic schedules. Linux scheduled installs require Agent 0.3.155+; macOS scheduled installs require Agent 0.3.103+.</span></div>
+      </>}
 
       {!!windowsManagement.length && <>
         <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Windows ownership</span><h3>Update management state</h3><p>Hi5Central applies a minimal local Windows Update policy only when an OS patch policy is assigned. Existing WSUS, Group Policy or MDM update management is never overwritten.</p></div></div>
