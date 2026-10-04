@@ -95,8 +95,14 @@ export function RmmAgentDeployment() {
   }, [])
 
   function changePlatform(platform) {
+    setError('')
     setSelectedPlatform(platform)
     setSelectedFormat(PLATFORM_FORMATS[platform]?.[0]?.format || '')
+  }
+
+  function changeFormat(format) {
+    setError('')
+    setSelectedFormat(format)
   }
 
   async function createInstaller() {
@@ -249,7 +255,7 @@ export function RmmAgentDeployment() {
 
           <label>
             <span>Installer type</span>
-            <select value={selectedFormat} onChange={(event) => setSelectedFormat(event.target.value)}>
+            <select value={selectedFormat} onChange={(event) => changeFormat(event.target.value)}>
               {PLATFORM_FORMATS[selectedPlatform].map((item) => (
                 <option key={item.format} value={item.format}>{item.label}</option>
               ))}
