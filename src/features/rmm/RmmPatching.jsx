@@ -26,7 +26,7 @@ import {
   archiveVendorSource,
   createPatchAssignment,
   createPatchPolicy,
-  evaluateWindowsUpdatePolicies,
+  evaluateOsPatchPolicies,
   pauseWindowsUpdateRollout,
   resumeWindowsUpdateRollout,
   rollbackWindowsUpdateRelease,
@@ -137,13 +137,34 @@ function readinessLabel(state) {
   return String(state || 'pending').replaceAll('_', ' ')
 }
 
+function osPolicyPlatformFlags(policy) {
+  const platforms = policy?.windows_rules?.platforms
+  if (!platforms || typeof platforms !== 'object' || !Object.keys(platforms).length) {
+    return { windows: true, linux: false, macos: false }
+  }
+  return {
+    windows: platforms.windows === true,
+    linux: platforms.linux === true,
+    macos: platforms.macos === true,
+  }
+}
+
+function osPolicyPlatformLabel(policy) {
+  const platforms = osPolicyPlatformFlags(policy)
+  const labels = []
+  if (platforms.windows) labels.push('Windows')
+  if (platforms.linux) labels.push('Linux')
+  if (platforms.macos) labels.push('macOS')
+  return labels.join(' · ') || 'No platforms'
+}
+
 function PageHeading({ action }) {
   return (
     <div className="rmm-page-heading">
       <div>
         <span className="rmm-eyebrow">Maintenance</span>
         <h1>Patching</h1>
-        <p>Software catalogue, Windows Update and patch policy targeting.</p>
+        <p>Software catalogue, Windows, Linux and macOS update scheduling, and patch policy targeting.</p>
       </div>
       {action}
     </div>
@@ -527,6 +548,9 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
   const type = policyType === 'software' ? 'software' : 'os'
   const maintenance = policy?.maintenance_window || {}
   const windowsRules = policy?.windows_rules || {}
+  const targetPlatforms = windowsRules.platforms || {}
+  const unixRules = windowsRules.unix || {}
+  const hasTargetPlatforms = targetPlatforms && typeof targetPlatforms === 'object' && Object.keys(targetPlatforms).length > 0
   const windowsDelays = windowsRules.delayDays || {}
   const rollout = windowsRules.rollout || {}
   const rolloutWaves = Array.isArray(rollout.waves) ? rollout.waves : []
@@ -554,6 +578,10 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
     softwareTargetMode,
     softwareCatalogueIds: Array.isArray(softwareRules.catalogueIds) ? softwareRules.catalogueIds : [],
     windowsEnabled: type === 'os',
+    targetWindows: policy ? (hasTargetPlatforms ? targetPlatforms.windows === true : true) : true,
+    targetLinux: policy ? targetPlatforms.linux === true : true,
+    targetMacos: policy ? targetPlatforms.macos === true : true,
+    unixInstallMode: ['all', 'security_only'].includes(unixRules.installMode) ? unixRules.installMode : 'all',
     rebootPolicy: policy?.reboot_policy || 'never',
     maxRetries: policy?.max_retries ?? 2,
     maintenanceStart: maintenance.start || '18:00',
@@ -631,6 +659,10 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
   const softwareSelectionInvalid = form.softwareEnabled
     && form.softwareTargetMode === 'selected_catalogue'
     && !form.softwareCatalogueIds.length
+  const osPlatformSelectionInvalid = form.windowsEnabled
+    && !form.targetWindows
+    && !form.targetLinux
+    && !form.targetMacos
 
   return <div className="rmm-patch-modal-backdrop">
     <form className="rmm-patch-modal rmm-patch-policy-modal" onSubmit={(event) => {
@@ -638,7 +670,7 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
       if (form.name.trim().length < 2) return
       if (form.windowsEnabled && !form.maintenanceDays.length) return
       if (form.softwareEnabled && !form.softwareMaintenanceDays.length) return
-      if (softwareSelectionInvalid) return
+      if (softwareSelectionInvalid || osPlatformSelectionInvalid) return
       onSave({
         ...form,
         policyType: type,
@@ -651,6 +683,15 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
           days: form.maintenanceDays,
         },
         windowsRules: {
+          platforms: {
+            windows: form.targetWindows,
+            linux: form.targetLinux,
+            macos: form.targetMacos,
+          },
+          unix: {
+            installMode: form.unixInstallMode,
+            includeMajorMacOsUpgrades: false,
+          },
           autoInstall: form.windowsAutoInstall,
           includeDrivers: form.includeDrivers,
           includeFeatureUpdates: form.includeFeatureUpdates,
@@ -705,13 +746,20 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
       </div>
 
       {type === 'os' && <section className="rmm-policy-schedule rmm-policy-domain">
-        <div className="rmm-policy-section-title"><strong>OS patching</strong><small>Controls Windows Update ownership, deferrals, deployment waves and the OS maintenance window.</small></div>
+        <div className="rmm-policy-section-title"><strong>OS patching</strong><small>One maintenance policy can target Windows Update, native Linux package updates and Apple Software Update.</small></div>
+        <div className="rmm-policy-subsection-title"><strong>Target platforms</strong><small>Only selected operating systems receive this policy when the assignment is evaluated.</small></div>
         <div className="rmm-patch-checks">
-          <label><input checked={form.windowsAutoInstall} onChange={(event) => update('windowsAutoInstall', event.target.checked)} type="checkbox" /><span><strong>Automatically install eligible updates</strong><small>Hi5Central owns Windows Update on assigned endpoints; automatic installs run only while the OS maintenance window is open.</small></span></label>
+          <label><input checked={form.targetWindows} onChange={(event) => update('targetWindows', event.target.checked)} type="checkbox" /><span><strong>Windows</strong><small>Windows Update with category deferrals and staged rollout.</small></span></label>
+          <label><input checked={form.targetLinux} onChange={(event) => update('targetLinux', event.target.checked)} type="checkbox" /><span><strong>Linux</strong><small>APT/DNF native OS and package updates. Scheduled installs require Agent 0.3.155+.</small></span></label>
+          <label><input checked={form.targetMacos} onChange={(event) => update('targetMacos', event.target.checked)} type="checkbox" /><span><strong>macOS</strong><small>Apple Software Update. Scheduled installs require Agent 0.3.103+.</small></span></label>
+        </div>
+        {osPlatformSelectionInvalid && <div className="rmm-policy-inline-error"><AlertTriangle size={14} /> Select at least one operating system.</div>}
+        <div className="rmm-patch-checks">
+          <label><input checked={form.windowsAutoInstall} onChange={(event) => update('windowsAutoInstall', event.target.checked)} type="checkbox" /><span><strong>Automatically install eligible updates</strong><small>Automatic installs run only while the OS maintenance window is open. Platform-native update services remain the source of truth.</small></span></label>
         </div>
 
         <>
-          <div className="rmm-policy-subsection-title"><strong>OS maintenance window</strong><small>Windows updates wait for this window after their category deferral and rollout wave open.</small></div>
+          <div className="rmm-policy-subsection-title"><strong>OS maintenance window</strong><small>Windows, Linux and macOS scheduled installs wait for this window. Windows additionally honours its category deferrals and rollout wave.</small></div>
           <div className="rmm-patch-form-grid">
             <label>Window starts<input type="time" value={form.maintenanceStart} onChange={(event) => update('maintenanceStart', event.target.value)} /></label>
             <label>Window ends<input type="time" value={form.maintenanceEnd} onChange={(event) => update('maintenanceEnd', event.target.value)} /></label>
@@ -719,7 +767,8 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
             <div className="wide rmm-policy-days"><span>OS patch days</span><div>{dayLabels.map(([label, day]) => <button className={form.maintenanceDays.includes(day) ? 'active' : ''} key={day} onClick={() => toggleDay(day)} type="button">{label}</button>)}</div></div>
           </div>
 
-          <div className="rmm-policy-subsection-title"><strong>Update deferrals</strong><small>Delay each Windows Update class before staged rollout begins.</small></div>
+          {form.targetWindows && <>
+          <div className="rmm-policy-subsection-title"><strong>Windows update deferrals</strong><small>Delay each Windows Update class before staged rollout begins.</small></div>
           <div className="rmm-policy-delay-grid">
             {[
               ['windowsCriticalDelay', 'Critical', 'Immediate by default'],
@@ -759,6 +808,15 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
             <label>Reboot handling<select value={form.rebootPolicy} onChange={(event) => update('rebootPolicy', event.target.value)}><option value="never">Do not reboot automatically</option><option value="maintenance_window">Reboot during maintenance window</option><option value="notify_user">Notify user before reboot</option></select></label>
           </div>
           <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>Windows updates install without forcing an automatic restart today. Reboot-required endpoints remain flagged until coordinated reboot automation is enabled.</span></div>
+          </>}
+
+          {(form.targetLinux || form.targetMacos) && <>
+            <div className="rmm-policy-subsection-title"><strong>Linux / macOS automatic scope</strong><small>Choose what the Unix scheduler may install during the maintenance window.</small></div>
+            <div className="rmm-patch-form-grid">
+              <label>Automatic install scope<select value={form.unixInstallMode} onChange={(event) => update('unixInstallMode', event.target.value)}><option value="all">All eligible native updates</option><option value="security_only">Security updates only</option></select></label>
+            </div>
+            <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>macOS major-version upgrades are excluded from automatic schedules. They remain explicit/manual while normal Apple security and recommended updates can be scheduled.</span></div>
+          </>}
         </>
       </section>}
 
@@ -817,7 +875,7 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
         </>
       </section>}
 
-      <footer><button onClick={onClose} type="button">Cancel</button><button className="rmm-primary" disabled={type === 'software' && softwareSelectionInvalid} type="submit"><PackageCheck size={15} /> {policy ? 'Save policy' : 'Create policy'}</button></footer>
+      <footer><button onClick={onClose} type="button">Cancel</button><button className="rmm-primary" disabled={(type === 'software' && softwareSelectionInvalid) || (type === 'os' && osPlatformSelectionInvalid)} type="submit"><PackageCheck size={15} /> {policy ? 'Save policy' : 'Create policy'}</button></footer>
     </form>
   </div>
 }
@@ -1955,12 +2013,12 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     setWindowsEvaluating(true)
     setError('')
     try {
-      const result = await evaluateWindowsUpdatePolicies(true)
+      const result = await evaluateOsPatchPolicies(true)
       const refreshed = await loadRmmPatching()
       setBundle(refreshed)
       return result
     } catch (requestError) {
-      setError(requestError?.message || 'Unable to evaluate Windows Update schedules.')
+      setError(requestError?.message || 'Unable to evaluate OS patch schedules.')
     } finally {
       setWindowsEvaluating(false)
     }
@@ -2042,7 +2100,7 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     {!softwareOnly && <nav className="rmm-patch-tabs">
       {[
         ['catalogue', 'Catalogue', catalogueFeed.total ?? catalogue.length],
-        ['windows', 'Windows Update', windowsPending],
+        ['windows', 'OS Updates', windowsPending],
         ['policies', 'Policies', policies.length],
       ].map(([id, label, count]) => <button className={tab === id ? 'active' : ''} key={id} onClick={() => setTab(id)} type="button">{label}<b>{count}</b></button>)}
     </nav>}
@@ -2235,7 +2293,7 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     </section>}
 
     {tab === 'windows' && <section className="rmm-patch-panel">
-      <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Windows Update</span><h2>OS patch scheduling</h2><p>Windows Update remains the source of applicable patches. Hi5Central decides when eligible updates may install based on assignment, release delay and maintenance window.</p></div><button disabled={windowsEvaluating} onClick={evaluateWindowsPatching} type="button"><RefreshCw size={14} /> {windowsEvaluating ? 'Evaluating…' : 'Evaluate schedules'}</button></div>
+      <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Cross-platform OS updates</span><h2>OS patch scheduling</h2><p>Windows Update, Linux APT/DNF and Apple Software Update remain platform-native. Hi5Central controls assignment and maintenance-window execution across all three.</p></div><button disabled={windowsEvaluating} onClick={evaluateWindowsPatching} type="button"><RefreshCw size={14} /> {windowsEvaluating ? 'Evaluating…' : 'Evaluate schedules'}</button></div>
       <div className="rmm-windows-summary">
         <article><small>Pending</small><strong>{windowsSummary.pending || 0}</strong><span>{windowsSummary.devices || 0} device{Number(windowsSummary.devices || 0) === 1 ? '' : 's'}</span></article>
         <article><small>Critical / security</small><strong>{Number(windowsSummary.critical || 0) + Number(windowsSummary.security || 0)}</strong><span>{windowsSummary.critical || 0} critical · {windowsSummary.security || 0} security</span></article>
@@ -2316,7 +2374,7 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     {tab === 'policies' && <section className="rmm-patch-panel rmm-policy-lists">
       <section className="rmm-policy-list-section">
         <div className="rmm-card-heading">
-          <div><span className="rmm-eyebrow">Windows management</span><h2>OS patching policies</h2><p>Windows Update ownership, maintenance windows, deferrals and deployment waves. OS policies are assigned independently from software policies.</p></div>
+          <div><span className="rmm-eyebrow">Cross-platform OS management</span><h2>OS patching policies</h2><p>Target Windows, Linux and macOS from the same OS policy while retaining platform-native update engines. OS policies remain independent from software policies.</p></div>
           <button className="rmm-primary compact" onClick={() => { setEditingPolicy(null); setPolicyModalType('os'); setShowPolicy(true) }} type="button"><Plus size={14} /> New OS policy</button>
         </div>
         <div className="rmm-patch-policy-grid">
@@ -2325,16 +2383,17 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
             <p>{policy.description || 'No description provided.'}</p>
             <div className="rmm-policy-domain-summary">
               <div>
-                <div className="domain-head"><strong>Windows Update</strong><StatusPill tone="healthy">{policy.windows_rules?.autoInstall ? 'Automatic' : 'Managed'}</StatusPill></div>
+                <div className="domain-head"><strong>{osPolicyPlatformLabel(policy)}</strong><StatusPill tone="healthy">{policy.windows_rules?.autoInstall ? 'Automatic' : 'Scheduled'}</StatusPill></div>
                 <small>{policy.maintenance_window?.start || '18:00'}–{policy.maintenance_window?.end || '05:00'} · {(policy.maintenance_window?.days || [1,2,3,4,5]).map((day) => ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'][day]).join(' · ')} · {policy.maintenance_window?.timezone || 'Europe/London'}</small>
-                <small>Critical {policy.windows_rules?.delayDays?.critical ?? 0}d · Security {policy.windows_rules?.delayDays?.security ?? policy.deployment_delay_days}d · Quality {policy.windows_rules?.delayDays?.quality ?? policy.deployment_delay_days}d · Feature {policy.windows_rules?.includeFeatureUpdates ? (policy.windows_rules?.delayDays?.feature ?? 14) + 'd' : 'off'} · Drivers {policy.windows_rules?.includeDrivers ? (policy.windows_rules?.delayDays?.driver ?? 14) + 'd' : 'off'}</small>
-                {policy.windows_rules?.rollout?.enabled && <small>Rollout · {(policy.windows_rules.rollout.waves || []).map((wave) => (wave.name || wave.id) + ' ' + wave.percentage + '% @ +' + wave.delayDays + 'd').join(' · ')} · deadline +{policy.windows_rules.rollout.deadlineDays ?? 7}d</small>}
+                {osPolicyPlatformFlags(policy).windows && <small>Windows · Critical {policy.windows_rules?.delayDays?.critical ?? 0}d · Security {policy.windows_rules?.delayDays?.security ?? policy.deployment_delay_days}d · Quality {policy.windows_rules?.delayDays?.quality ?? policy.deployment_delay_days}d · Feature {policy.windows_rules?.includeFeatureUpdates ? (policy.windows_rules?.delayDays?.feature ?? 14) + 'd' : 'off'} · Drivers {policy.windows_rules?.includeDrivers ? (policy.windows_rules?.delayDays?.driver ?? 14) + 'd' : 'off'}</small>}
+                {(osPolicyPlatformFlags(policy).linux || osPolicyPlatformFlags(policy).macos) && <small>Linux / macOS · {policy.windows_rules?.unix?.installMode === 'security_only' ? 'Security updates only' : 'All eligible native updates'} · macOS major upgrades excluded</small>}
+                {osPolicyPlatformFlags(policy).windows && policy.windows_rules?.rollout?.enabled && <small>Windows rollout · {(policy.windows_rules.rollout.waves || []).map((wave) => (wave.name || wave.id) + ' ' + wave.percentage + '% @ +' + wave.delayDays + 'd').join(' · ')} · deadline +{policy.windows_rules.rollout.deadlineDays ?? 7}d</small>}
               </div>
             </div>
             <footer><span>{assignments.filter((assignment) => assignment.policy_id === policy.id && assignment.enabled !== false).length} assignments</span><div><button disabled={saving} onClick={() => { setEditingPolicy(policy); setPolicyModalType('os'); setShowPolicy(true) }} type="button"><Wrench size={14} /> Edit</button><button disabled={saving} onClick={() => setAssignPolicy(policy)} type="button"><GitBranch size={14} /> Assign scope</button></div></footer>
           </article>)}
         </div>
-        {!osPolicies.length && <div className="rmm-empty"><Monitor size={24} /><strong>No OS patching policies</strong><span>Create an OS policy to manage Windows Update schedules and rollout.</span></div>}
+        {!osPolicies.length && <div className="rmm-empty"><Monitor size={24} /><strong>No OS patching policies</strong><span>Create one OS policy for Windows, Linux and/or macOS maintenance schedules.</span></div>}
         {!!assignments.filter((assignment) => osPolicies.some((policy) => policy.id === assignment.policy_id)).length && <div className="rmm-patch-assignments">
           <div className="head"><span>OS scope</span><span>Policy</span><span>Priority</span><span /></div>
           {assignments.filter((assignment) => osPolicies.some((policy) => policy.id === assignment.policy_id)).map((assignment) => <div className="row" key={assignment.id}><span><strong>{assignment.scope_name || assignment.scope_id}</strong><small>{assignment.scope_type}</small></span><span><strong>{osPolicies.find((policy) => policy.id === assignment.policy_id)?.name || assignment.policy_id}</strong></span><span><strong>{assignment.priority}</strong></span><span><button disabled={saving} onClick={() => removeAssignment(assignment)} type="button"><Trash2 size={14} /></button></span></div>)}
