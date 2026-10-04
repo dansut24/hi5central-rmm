@@ -3606,6 +3606,12 @@ function bindRemoteInput() {
   function shortcutFromKeyboardEvent(ev) {
     if (!ev) return "";
 
+    // Portable macOS/Linux hosts receive the physical modifier/key sequence.
+    // Windows service shortcuts are not meaningful there (Command+Tab must
+    // remain Command+Tab on macOS; Alt+Tab/Super shortcuts stay native on Linux).
+    const remotePlatform = currentRemotePlatform();
+    if (remotePlatform === 'macos' || remotePlatform === 'linux') return "";
+
     // Windows-key combinations. The native viewer hook handles these when
     // maximised, but keep this path for WebView builds that also surface Meta.
     if (ev.metaKey || ev.key === "Meta" || ev.key === "OS") {
