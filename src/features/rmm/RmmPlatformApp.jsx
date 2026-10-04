@@ -1831,7 +1831,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   ].filter(Boolean).join(' ').toLowerCase()
   const isLinuxDevice = /linux|fedora|ubuntu|debian|rhel|centos|rocky|alma|opensuse|suse/.test(devicePlatformText)
   const waylandPersistenceSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.151')
-  const waylandPersistenceStatusSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.152')
+  const waylandPersistenceStatusSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.153')
 
   useEffect(() => {
     prefetchDeviceHistory(device).catch(() => {})
@@ -2220,7 +2220,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     remembered: 'Remembered',
     not_remembered: 'Not remembered',
     offline: 'Offline',
-    upgrade_required: 'Status requires 0.3.152+',
+    upgrade_required: 'Status requires 0.3.153+',
     unavailable: 'No active user',
     unknown: 'Status unknown',
     unsupported: 'Unsupported',
