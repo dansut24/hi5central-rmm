@@ -739,6 +739,8 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 .rmm-agent-security-card > div svg { color: #239e63; }
 .rmm-agent-error { margin-bottom: 12px; border: 1px solid rgba(218,73,91,.24); border-radius: 9px; padding: 10px 12px; background: rgba(218,73,91,.08); color: #c83f50; font-size: 9px; font-weight: 800; }
 
+.rmm-agent-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.rmm-agent-heading-actions button { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; }
 .rmm-agent-issued-card { display: grid; gap: 10px; margin-bottom: 14px; }
 .rmm-agent-build-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--rmm-border); border-radius: 8px; padding: 9px 10px; background: var(--rmm-soft); color: var(--rmm-muted); font-size: 8px; font-weight: 750; }
 .rmm-agent-build-state.ready { border-color: rgba(35,158,99,.2); background: rgba(35,158,99,.07); color: #188c61; }
