@@ -882,9 +882,11 @@
       #mobile-keyboard-rows { display: grid; gap: 4px; }
       .remote-keyboard-row { display: flex; gap: 4px; min-width: 0; }
       .remote-key {
+        position: relative;
         flex: 1 1 0;
         min-width: 0;
         height: 34px;
+        overflow: visible;
         border: 1px solid rgba(255,255,255,.12);
         border-radius: 7px;
         background: rgba(255,255,255,.07);
@@ -893,6 +895,47 @@
         font-size: 12px;
         font-weight: 720;
         touch-action: manipulation;
+      }
+      .remote-key-preview {
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 7px);
+        z-index: 4;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 42px;
+        height: 48px;
+        padding: 0 8px;
+        border: 1px solid rgba(255,255,255,.22);
+        border-radius: 12px;
+        background: rgba(34,41,54,.985);
+        color: #fff;
+        box-shadow: 0 8px 20px rgba(0,0,0,.38);
+        font-size: 25px;
+        font-weight: 650;
+        line-height: 1;
+        opacity: 0;
+        transform: translate(-50%, 5px) scale(.94);
+        transform-origin: 50% 100%;
+        pointer-events: none;
+        transition: opacity 55ms ease-out, transform 70ms ease-out;
+      }
+      .remote-key-preview::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 100%;
+        width: 10px;
+        height: 10px;
+        background: rgba(34,41,54,.985);
+        border-right: 1px solid rgba(255,255,255,.18);
+        border-bottom: 1px solid rgba(255,255,255,.18);
+        transform: translate(-50%, -5px) rotate(45deg);
+      }
+      .remote-key.previewing .remote-key-preview {
+        opacity: 1;
+        transform: translate(-50%, 0) scale(1);
       }
       .remote-key.wide { flex: 1.45 1 0; }
       .remote-key.space { flex: 4 1 0; }
