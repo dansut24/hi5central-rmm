@@ -1125,12 +1125,16 @@ function toggleMobileKeyboard(force) {
 }
 
 function sendMobileTextEntry() {
-  if (!elMobileTextInput) return;
+  if (!elMobileTextInput || !currentSession) return;
   const text = String(elMobileTextInput.value || '');
-  if (!text) return;
   enterRemoteControlMode();
-  sendInput('text_input', { text }, true);
-  elMobileTextInput.value = '';
+  if (text) {
+    sendInput('text_input', { text }, true);
+    elMobileTextInput.value = '';
+  }
+  const enterFlags = { ctrl: false, alt: false, shift: false, meta: false };
+  sendInput('key_down', { code: 'Enter', key: 'Enter', repeat: false, ...enterFlags }, true);
+  sendInput('key_up', { code: 'Enter', key: 'Enter', ...enterFlags }, true);
   elMobileTextInput.focus({ preventScroll: true });
 }
 
@@ -2426,6 +2430,8 @@ function sendInput(kind, extra = {}, force = false) {
 
 function updateMobileClipboardAvailability() {
   const connected = !!currentSession;
+  if (elMobileTextInput) elMobileTextInput.disabled = !connected;
+  if (elMobileTextSend) elMobileTextSend.disabled = !connected;
   if (elMobileClipboardPaste) elMobileClipboardPaste.disabled = !connected;
   if (elMobileClipboardCopy) {
     elMobileClipboardCopy.disabled = !connected || currentSession?.clipboardReadSupported === false;

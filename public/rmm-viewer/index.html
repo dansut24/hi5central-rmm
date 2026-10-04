@@ -713,10 +713,12 @@
         bottom: max(8px, env(safe-area-inset-bottom));
         transform: translateX(-50%);
         z-index: 26;
+        width: min(calc(100vw - 12px), 680px);
+        box-sizing: border-box;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        padding: 6px;
+        gap: 4px;
+        padding: 4px;
         border: 1px solid rgba(255,255,255,.13);
         border-radius: 13px;
         background: rgba(8,12,19,.94);
@@ -726,18 +728,45 @@
       }
       #mobile-bottom-actions.visible { display: flex; }
       #mobile-bottom-actions button {
+        flex: 0 0 auto;
         min-height: 38px;
-        min-width: 78px;
-        padding: 0 10px;
+        min-width: 0;
+        padding: 0 8px;
         border: 1px solid rgba(255,255,255,.12);
         border-radius: 9px;
         background: rgba(255,255,255,.06);
         color: var(--text);
         font: inherit;
-        font-size: 11px;
+        font-size: 10.5px;
         font-weight: 760;
         touch-action: manipulation;
+        white-space: nowrap;
       }
+      #mobile-text-input {
+        flex: 1 1 120px;
+        min-width: 76px;
+        height: 38px;
+        box-sizing: border-box;
+        border: 1px solid rgba(255,255,255,.13);
+        border-radius: 9px;
+        padding: 0 10px;
+        background: rgba(255,255,255,.06);
+        color: var(--text);
+        font: inherit;
+        font-size: 16px;
+        outline: none;
+      }
+      #mobile-text-input:focus { border-color: rgba(var(--accent),.62); }
+      #mobile-text-input:disabled { opacity: .42; }
+      #mobile-text-send {
+        min-width: 52px !important;
+        border-color: rgba(var(--accent),.55) !important;
+        background: rgba(var(--accent),.24) !important;
+        color: #fff !important;
+      }
+      #btn-keyboard { min-width: 82px !important; }
+      #mobile-clipboard-paste { min-width: 52px !important; }
+      #mobile-clipboard-copy { min-width: 74px !important; }
       #mobile-bottom-actions button:disabled { opacity: .42; }
       #mobile-bottom-actions button.active {
         border-color: rgba(var(--accent),.72);
@@ -845,40 +874,6 @@
         background: rgba(255,255,255,.05);
         color: var(--text);
       }
-      .mobile-text-entry {
-        display: flex;
-        align-items: stretch;
-        gap: 6px;
-        padding: 0 2px 2px;
-      }
-      #mobile-text-input {
-        flex: 1 1 auto;
-        min-width: 0;
-        min-height: 38px;
-        max-height: 86px;
-        resize: vertical;
-        border: 1px solid rgba(255,255,255,.13);
-        border-radius: 9px;
-        padding: 8px 10px;
-        background: rgba(255,255,255,.06);
-        color: var(--text);
-        font: inherit;
-        font-size: 16px;
-        outline: none;
-      }
-      #mobile-text-input:focus { border-color: rgba(var(--accent),.62); }
-      #mobile-text-send {
-        flex: 0 0 auto;
-        min-width: 62px;
-        border: 1px solid rgba(var(--accent),.55);
-        border-radius: 9px;
-        padding: 0 12px;
-        background: rgba(var(--accent),.24);
-        color: #fff;
-        font: inherit;
-        font-weight: 750;
-        touch-action: manipulation;
-      }
       #mobile-keyboard-rows { display: grid; gap: 4px; }
       .remote-keyboard-row { display: flex; gap: 4px; min-width: 0; }
       .remote-key {
@@ -954,9 +949,12 @@
       .icon-btn, #btn-monitor { height: 30px; }
       #btn-disconnect { height: 29px; }
       #mobile-keyboard.visible { max-height: 52dvh; }
-      #mobile-bottom-actions { gap:4px; padding:4px; }
-      #mobile-bottom-actions button { min-width:66px; min-height:40px; padding:0 7px; font-size:10px; }
-      #mobile-view-controls button { min-height:40px; }
+      #mobile-bottom-actions { gap:3px; padding:3px; }
+      #mobile-bottom-actions button { min-height:38px; padding:0 6px; font-size:10px; }
+      #mobile-text-input { height:38px; min-width:68px; padding:0 8px; }
+      #btn-keyboard { min-width:76px !important; }
+      #mobile-clipboard-paste { min-width:48px !important; }
+      #mobile-clipboard-copy { min-width:68px !important; }
       .remote-key { height: 30px; font-size: 11px; }
       .mobile-keyboard-head { min-height: 24px; }
     }
@@ -1003,15 +1001,9 @@
   <img id="remote-image" alt="Remote desktop stream" />
   <button id="mobile-toolbar-handle" type="button" aria-label="Show session toolbar">Controls</button>
   <button id="mobile-quality-indicator" type="button" aria-label="Connection quality" title="Connection quality">Good</button>
-  <div id="mobile-view-controls" aria-label="Mobile remote controls">
-    <button id="mobile-input-mode" type="button" aria-label="Switch touch mode">Touch</button>
-    <button id="mobile-pan-mode" type="button" aria-label="Pan viewport" title="Pan viewport">✋</button>
-    <button id="mobile-precision-mode" type="button" aria-label="Precision targeting" title="Precision targeting">⌖</button>
-    <button id="mobile-zoom-out" type="button" aria-label="Zoom out">−</button>
-    <button id="mobile-zoom-fit" type="button">Fit</button>
-    <button id="mobile-zoom-in" type="button" aria-label="Zoom in">+</button>
-  </div>
-  <div id="mobile-bottom-actions" aria-label="Mobile keyboard and clipboard controls">
+  <div id="mobile-bottom-actions" aria-label="Mobile text, keyboard and clipboard controls">
+    <input id="mobile-text-input" type="text" inputmode="text" enterkeyhint="send" autocapitalize="sentences" autocomplete="off" spellcheck="false" placeholder="Enter text" disabled />
+    <button id="mobile-text-send" type="button" disabled>Enter</button>
     <button id="btn-keyboard" class="mobile-bottom-btn" disabled type="button" aria-label="Remote keyboard">⌨ Keyboard</button>
     <button id="mobile-clipboard-paste" type="button" disabled>Paste</button>
     <button id="mobile-clipboard-copy" type="button" disabled>Copy remote</button>
@@ -1153,10 +1145,6 @@
 
 <section id="mobile-keyboard" aria-label="Remote keyboard">
   <div class="mobile-keyboard-head"><span>Remote keyboard · <strong id="mobile-keyboard-platform">Remote</strong></span><div class="mobile-keyboard-head-actions"><button id="mobile-keyboard-close" type="button" aria-label="Close keyboard">✕</button></div></div>
-  <div class="mobile-text-entry">
-    <textarea id="mobile-text-input" rows="1" inputmode="text" enterkeyhint="send" autocapitalize="sentences" autocomplete="off" spellcheck="false" placeholder="Paste or enter text"></textarea>
-    <button id="mobile-text-send" type="button">Send</button>
-  </div>
   <div id="mobile-keyboard-rows"></div>
 </section>
 
