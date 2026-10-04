@@ -1802,6 +1802,11 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [remoteBusyMode, setRemoteBusyMode] = useState('')
   const [waylandPersistence, setWaylandPersistence] = useState(false)
+  const [waylandPersistenceStatus, setWaylandPersistenceStatus] = useState({
+    state: 'checking',
+    remembered: null,
+    activeUser: null,
+  })
   const [forgetWaylandBusy, setForgetWaylandBusy] = useState(false)
   const [viewerInstallPrompt, setViewerInstallPrompt] = useState(null)
   const [powerBusy, setPowerBusy] = useState(false)
@@ -1826,6 +1831,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   ].filter(Boolean).join(' ').toLowerCase()
   const isLinuxDevice = /linux|fedora|ubuntu|debian|rhel|centos|rocky|alma|opensuse|suse/.test(devicePlatformText)
   const waylandPersistenceSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.151')
+  const waylandPersistenceStatusSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.152')
 
   useEffect(() => {
     prefetchDeviceHistory(device).catch(() => {})
@@ -1836,6 +1842,53 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     setTool(initialSection === 'tools' ? (initialTool || '') : '')
     setWaylandPersistence(false)
   }, [device.id, initialSection, initialTool])
+
+  useEffect(() => {
+    if (!isLinuxDevice) {
+      setWaylandPersistenceStatus({ state: 'unsupported', remembered: null, activeUser: null })
+      return undefined
+    }
+    if (!waylandPersistenceStatusSupported) {
+      setWaylandPersistenceStatus({ state: 'upgrade_required', remembered: null, activeUser: null })
+      return undefined
+    }
+    if (!device.agentDeviceId || !deviceOnline) {
+      setWaylandPersistenceStatus({ state: 'offline', remembered: null, activeUser: null })
+      return undefined
+    }
+
+    let active = true
+    const refresh = async () => {
+      setWaylandPersistenceStatus((current) => ({
+        ...current,
+        state: current.remembered == null ? 'checking' : current.state,
+      }))
+      try {
+        const response = await fetch(
+          apiBase + '/api/v1/rmm/devices/' + encodeURIComponent(device.agentDeviceId) + '/wayland-persistence',
+          { credentials: 'include', cache: 'no-store' },
+        )
+        const payload = await response.json().catch(() => ({}))
+        if (!active) return
+        if (!response.ok) throw new Error(payload.error || 'Unable to read remembered Wayland access.')
+        setWaylandPersistenceStatus({
+          state: payload.state || (payload.remembered === true ? 'remembered' : 'not_remembered'),
+          remembered: payload.remembered === true ? true : payload.remembered === false ? false : null,
+          activeUser: payload.activeUser || null,
+        })
+      } catch {
+        if (active) setWaylandPersistenceStatus({ state: 'unknown', remembered: null, activeUser: null })
+      }
+    }
+
+    refresh()
+    const onFocus = () => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      active = false
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [apiBase, device.agent, device.agentDeviceId, device.id, deviceOnline, isLinuxDevice, waylandPersistenceStatusSupported])
 
   useEffect(() => {
     const nav = subnavRef.current
@@ -2110,6 +2163,11 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'Unable to forget remembered Wayland access.')
       setWaylandPersistence(false)
+      setWaylandPersistenceStatus({
+        state: 'not_remembered',
+        remembered: false,
+        activeUser: payload.activeUser || waylandPersistenceStatus.activeUser || null,
+      })
       setRemoteState(payload.message || 'Remembered Wayland access cleared. The next persistent session will ask for approval again.')
     } catch (error) {
       setRemoteState(error?.message || 'Unable to forget remembered Wayland access.')
@@ -2157,6 +2215,17 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       ? patchPendingParts.join(' · ') + ' pending'
       : 'No pending updates'
 
+  const waylandPersistenceStateLabel = {
+    checking: 'Checking…',
+    remembered: 'Remembered',
+    not_remembered: 'Not remembered',
+    offline: 'Offline',
+    upgrade_required: 'Status requires 0.3.152+',
+    unavailable: 'No active user',
+    unknown: 'Status unknown',
+    unsupported: 'Unsupported',
+  }[waylandPersistenceStatus.state] || 'Status unknown'
+
   let content
   if (section === 'hardware') content = <DeviceHardware device={device} />
   else if (section === 'windows') content = <DeviceWindows device={device} />
@@ -2194,8 +2263,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
         <div className="rmm-wayland-persistence-copy">
           <span className="rmm-wayland-persistence-icon"><ShieldCheck size={17} /></span>
           <div>
-            <strong>Persistent Wayland access <b>Limited</b></strong>
-            <small>{waylandPersistenceSupported ? 'Off uses a normal one-time Linux share prompt. When enabled, Hi5Central asks the desktop portal to remember screen, interaction and clipboard approval. Desktop-environment support varies and Linux may occasionally ask again.' : 'Requires Hi5Central Agent 0.3.151 or newer. Update the Agent before enabling remembered Wayland access.'}</small>
+            <strong>Persistent Wayland access <b>Limited</b><span className={'rmm-wayland-memory-state ' + waylandPersistenceStatus.state}>{waylandPersistenceStateLabel}</span></strong>
+            <small>{waylandPersistenceSupported ? 'Off uses a normal one-time Linux share prompt. When enabled, Hi5Central asks the desktop portal to remember screen, interaction and clipboard approval. The remembered badge is reported live by the endpoint.' : 'Requires Hi5Central Agent 0.3.151 or newer. Update the Agent before enabling remembered Wayland access.'}</small>
           </div>
         </div>
         <label className="rmm-wayland-persistence-toggle">
@@ -2206,18 +2275,18 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
             type="checkbox"
           />
           <span>
-            <strong>Remember access for this remote session</strong>
-            <small>{!waylandPersistenceSupported ? 'Agent update required.' : waylandPersistence ? 'Persistent access requested · local approval is required the first time.' : 'One-time session · remembered permission will not be used.'}</small>
+            <strong>{waylandPersistenceStatus.remembered === true ? 'Use remembered access for this session' : 'Remember access for this remote session'}</strong>
+            <small>{!waylandPersistenceSupported ? 'Agent update required.' : waylandPersistence ? (waylandPersistenceStatus.remembered === true ? 'The stored Wayland approval will be used if the desktop portal accepts it.' : 'Persistent access requested · local approval is required the first time.') : 'One-time session · remembered permission will not be used.'}</small>
           </span>
         </label>
-        <button
+        {waylandPersistenceStatus.remembered === true && <button
           className="rmm-wayland-forget"
           disabled={!hasLiveAgent || !deviceOnline || forgetWaylandBusy || !waylandPersistenceSupported}
           onClick={forgetRememberedWaylandAccess}
           type="button"
         >
           <Trash2 size={14} /> {forgetWaylandBusy ? 'Forgetting…' : 'Forget remembered access'}
-        </button>
+        </button>}
       </section>}
 
       {deviceOffline && <div className="rmm-device-offline-banner"><WifiOff size={17} /><div><strong>Device offline</strong><span>Live controls are disabled and no new Agent jobs will be queued. Last-known inventory, Activity, Jobs and ITSM history remain available.</span></div><small>Last seen {device.lastSeen || 'not reported'}</small></div>}
