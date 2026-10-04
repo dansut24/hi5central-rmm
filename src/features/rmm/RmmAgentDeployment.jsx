@@ -4,8 +4,7 @@ const API_BASE = window.__HI5_API_BASE__ || ''
 
 const PLATFORM_FORMATS = {
   windows: [
-    { format: 'exe', label: 'EXE', detail: 'Interactive, scripts and software deployment' },
-    { format: 'msi', label: 'MSI', detail: 'Intune, Ivanti, GPO and managed deployment' },
+    { format: 'exe', label: 'EXE', detail: 'Single-file native installer · interactive, scripts, Intune and Ivanti' },
   ],
   macos: [
     { format: 'pkg', label: 'PKG', detail: 'Recommended for MDM and managed deployment' },
