@@ -47,7 +47,7 @@ function selectionLabel(pkg) {
 function installCommand(pkg) {
   const format = pkg?.installer_format
   if (format === 'exe') {
-    return '.\\Hi5CentralAgentDeployment-Windows.exe --quiet --config ".\\Hi5CentralDeployment.json"'
+    return '.\\Hi5CentralAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DEPLOYMENT_CONFIG=".\\Hi5CentralDeployment.json" /INSTALL_SOURCE="deployment-json"'
   }
   if (format === 'msi') {
     return 'msiexec /i "Hi5CentralAgentDeployment-Windows.msi" /qn HI5DEPLOYMENTCONFIG="%CD%\\Hi5CentralDeployment.json"'
