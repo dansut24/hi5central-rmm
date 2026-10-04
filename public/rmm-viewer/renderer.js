@@ -60,6 +60,7 @@ const elMobileZoomIn = document.getElementById("mobile-zoom-in");
 const elBtnKeyboard = document.getElementById("btn-keyboard");
 const elMobileKeyboard = document.getElementById("mobile-keyboard");
 const elMobileKeyboardRows = document.getElementById("mobile-keyboard-rows");
+const elMobileKeyboardPlatform = document.getElementById("mobile-keyboard-platform");
 const elMobileKeyboardClose = document.getElementById("mobile-keyboard-close");
 const elMobileTextInput = document.getElementById("mobile-text-input");
 const elMobileTextSend = document.getElementById("mobile-text-send");
@@ -851,7 +852,7 @@ if (new URLSearchParams(location.search).get('diagnostics') === '1') mobilePrefs
 
 let mobileKeyboardOpen = false;
 let mobileKeyboardLayer = 'letters';
-const mobileKeyboardModifiers = { shift: false, ctrl: false, alt: false };
+const mobileKeyboardModifiers = { shift: false, ctrl: false, alt: false, meta: false };
 
 const MOBILE_LETTER_ROWS = [
   ['q','w','e','r','t','y','u','i','o','p'],
@@ -895,10 +896,93 @@ function normalizeMobileKey(def) {
   return { ...def };
 }
 
+function normalizeRemotePlatform(value = '') {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'unknown';
+  if (raw.includes('macos') || raw.includes('mac os') || raw.includes('darwin') || raw.startsWith('mac')) return 'macos';
+  if (raw.includes('linux') || raw.includes('wayland') || raw.includes('x11') ||
+      raw.includes('ubuntu') || raw.includes('debian') || raw.includes('fedora') ||
+      raw.includes('rhel') || raw.includes('centos') || raw.includes('suse') ||
+      raw.includes('arch')) return 'linux';
+  if (raw.includes('windows') || raw.startsWith('win')) return 'windows';
+  return 'unknown';
+}
+
+function remotePlatformFromBackend(value = '') {
+  const backend = String(value || '').toLowerCase();
+  if (backend.includes('macos')) return 'macos';
+  if (backend.includes('wayland') || backend.includes('x11') || backend.includes('linux')) return 'linux';
+  if (backend.includes('windows')) return 'windows';
+  return 'unknown';
+}
+
+function currentRemotePlatform() {
+  return normalizeRemotePlatform(currentSession?.remotePlatform || '');
+}
+
+function remotePlatformLabel(platform = currentRemotePlatform()) {
+  if (platform === 'macos') return 'macOS';
+  if (platform === 'linux') return 'Linux';
+  if (platform === 'windows') return 'Windows';
+  return 'Remote';
+}
+
+function setCurrentRemotePlatform(value, clipboardReadSupported = undefined) {
+  if (!currentSession) return;
+  const normalized = normalizeRemotePlatform(value);
+  if (normalized !== 'unknown') currentSession.remotePlatform = normalized;
+  if (typeof clipboardReadSupported === 'boolean') {
+    currentSession.clipboardReadSupported = clipboardReadSupported;
+  }
+  renderMobileKeyboard();
+  updateMobileClipboardAvailability();
+}
+
+function platformAwareKeyboardRows() {
+  const platform = currentRemotePlatform();
+  let rows = mobileKeyboardLayer === 'symbols'
+    ? MOBILE_SYMBOL_ROWS
+    : (mobileKeyboardLayer === 'function' ? MOBILE_FUNCTION_ROWS : MOBILE_LETTER_ROWS);
+
+  rows = rows.map((row) => row.map((rawDef) => {
+    if (!rawDef || typeof rawDef !== 'object') return rawDef;
+    const def = { ...rawDef };
+    if (def.action === 'start_menu' && platform === 'macos') {
+      return { label: '⌘', modifier: 'meta' };
+    }
+    if (def.action === 'start_menu' && platform === 'linux') {
+      return { label: 'Super', modifier: 'meta' };
+    }
+    if (def.modifier === 'alt' && platform === 'macos') def.label = 'Option';
+    return def;
+  }));
+
+  if (mobileKeyboardLayer === 'function' && (platform === 'macos' || platform === 'linux')) {
+    rows[3] = [
+      { label: 'Caps', code: 'CapsLock', key: 'CapsLock' },
+      { label: 'Esc', code: 'Escape', key: 'Escape' },
+      { label: 'Tab', code: 'Tab', key: 'Tab' },
+      { label: '⌫', code: 'Backspace', key: 'Backspace' },
+      { label: 'Del', code: 'Delete', key: 'Delete' }
+    ];
+    rows[4] = [
+      { label: 'ABC', layer: 'letters', wide: true },
+      { label: '123', layer: 'symbols', wide: true },
+      { label: 'Ctrl', modifier: 'ctrl' },
+      { label: platform === 'macos' ? 'Option' : 'Alt', modifier: 'alt' },
+      { label: platform === 'macos' ? '⌘' : 'Super', modifier: 'meta' },
+      { label: 'Shift', modifier: 'shift' },
+      { label: 'Enter', code: 'Enter', key: 'Enter', wide: true }
+    ];
+  }
+  return rows;
+}
+
 function clearMobileKeyboardModifiers() {
   mobileKeyboardModifiers.shift = false;
   mobileKeyboardModifiers.ctrl = false;
   mobileKeyboardModifiers.alt = false;
+  mobileKeyboardModifiers.meta = false;
 }
 
 function updateMobileKeyboardModifierButtons() {
@@ -913,6 +997,7 @@ function sendMobileKeyCombo(def) {
   const ctrl = mobileKeyboardModifiers.ctrl;
   const alt = mobileKeyboardModifiers.alt;
   const shift = mobileKeyboardModifiers.shift;
+  const meta = mobileKeyboardModifiers.meta;
   const code = def.code || keyboardCodeForText(def.text || '');
   const key = def.key || def.text || def.label || '';
 
@@ -923,7 +1008,7 @@ function sendMobileKeyCombo(def) {
     return;
   }
 
-  if (def.text != null && !ctrl && !alt) {
+  if (def.text != null && !ctrl && !alt && !meta) {
     let text = String(def.text);
     if (shift) {
       if (/^[a-z]$/i.test(text)) text = text.toUpperCase();
@@ -935,8 +1020,10 @@ function sendMobileKeyCombo(def) {
     if (ctrl) sendInput('key_down', { code: 'ControlLeft', key: 'Control' }, true);
     if (alt) sendInput('key_down', { code: 'AltLeft', key: 'Alt' }, true);
     if (shift) sendInput('key_down', { code: 'ShiftLeft', key: 'Shift' }, true);
-    sendInput('key_down', { code, key, repeat: false, ctrl, alt, shift }, true);
-    sendInput('key_up', { code, key, ctrl, alt, shift }, true);
+    if (meta) sendInput('key_down', { code: 'MetaLeft', key: 'Meta' }, true);
+    sendInput('key_down', { code, key, repeat: false, ctrl, alt, shift, meta }, true);
+    sendInput('key_up', { code, key, ctrl, alt, shift, meta }, true);
+    if (meta) sendInput('key_up', { code: 'MetaLeft', key: 'Meta' }, true);
     if (shift) sendInput('key_up', { code: 'ShiftLeft', key: 'Shift' }, true);
     if (alt) sendInput('key_up', { code: 'AltLeft', key: 'Alt' }, true);
     if (ctrl) sendInput('key_up', { code: 'ControlLeft', key: 'Control' }, true);
@@ -963,7 +1050,8 @@ function handleMobileKeyboardKey(def) {
 function renderMobileKeyboard() {
   if (!elMobileKeyboardRows) return;
   elMobileKeyboardRows.innerHTML = '';
-  const rows = mobileKeyboardLayer === 'symbols' ? MOBILE_SYMBOL_ROWS : (mobileKeyboardLayer === 'function' ? MOBILE_FUNCTION_ROWS : MOBILE_LETTER_ROWS);
+  const rows = platformAwareKeyboardRows();
+  if (elMobileKeyboardPlatform) elMobileKeyboardPlatform.textContent = remotePlatformLabel();
   for (const rowDefs of rows) {
     const row = document.createElement('div');
     row.className = 'remote-keyboard-row';
@@ -2297,6 +2385,17 @@ function sendInput(kind, extra = {}, force = false) {
   }
 }
 
+function updateMobileClipboardAvailability() {
+  const connected = !!currentSession;
+  if (elMobileClipboardPaste) elMobileClipboardPaste.disabled = !connected;
+  if (elMobileClipboardCopy) {
+    elMobileClipboardCopy.disabled = !connected || currentSession?.clipboardReadSupported === false;
+    elMobileClipboardCopy.title = currentSession?.clipboardReadSupported === false
+      ? 'Remote clipboard reading is not available for this endpoint.'
+      : 'Copy the current remote selection to this device.';
+  }
+}
+
 async function pastePhoneClipboardToRemote() {
   let text = '';
   try { text = await navigator.clipboard.readText(); } catch {}
@@ -2306,17 +2405,44 @@ async function pastePhoneClipboardToRemote() {
     return;
   }
   enterRemoteControlMode();
-  sendInput('clipboard_paste', { text }, true);
-  setMobileClipboardStatus('Pasted clipboard to remote.');
+  const platform = currentRemotePlatform();
+  if (platform === 'macos' || platform === 'linux') {
+    // Portable Unix agents accept Unicode text directly. This avoids assuming
+    // Windows Ctrl+V semantics and works with macOS Command/Option layouts and
+    // Linux Wayland/X11 sessions.
+    sendInput('text_input', { text }, true);
+  } else {
+    sendInput('clipboard_paste', { text }, true);
+  }
+  setMobileClipboardStatus('Pasted to ' + remotePlatformLabel(platform) + '.');
   scheduleMobileToolbarHide();
 }
 
+function sendRemoteCopyShortcut() {
+  const platform = currentRemotePlatform();
+  const modifierCode = platform === 'macos' ? 'MetaLeft' : 'ControlLeft';
+  const modifierKey = platform === 'macos' ? 'Meta' : 'Control';
+  const flags = {
+    ctrl: platform !== 'macos',
+    alt: false,
+    shift: false,
+    meta: platform === 'macos'
+  };
+  sendInput('key_down', { code: modifierCode, key: modifierKey, ...flags }, true);
+  sendInput('key_down', { code: 'KeyC', key: 'c', repeat: false, ...flags }, true);
+  sendInput('key_up', { code: 'KeyC', key: 'c', ...flags }, true);
+  sendInput('key_up', { code: modifierCode, key: modifierKey, ...flags }, true);
+}
+
 function requestRemoteClipboard() {
-  if (!currentSession) return;
+  if (!currentSession || currentSession.clipboardReadSupported === false) return;
   mobileClipboardRequestPending = true;
-  setMobileClipboardStatus('Copying remote selection…');
+  setMobileClipboardStatus('Copying ' + remotePlatformLabel() + ' selection…');
   enterRemoteControlMode();
-  sendInput('clipboard_get', {}, true);
+  sendRemoteCopyShortcut();
+  window.setTimeout(() => {
+    if (currentSession && mobileClipboardRequestPending) sendInput('clipboard_get', {}, true);
+  }, 120);
 }
 
 async function handleViewerControlMessage(raw) {
@@ -4150,7 +4276,18 @@ async function onSignalMessage(raw) {
     case "session_config": {
       if (currentSession) {
         currentSession.iceServers = normalizeIceServers(msg.ice_servers || msg.iceServers || []);
+        if (msg.remote_platform || msg.remotePlatform) {
+          setCurrentRemotePlatform(msg.remote_platform || msg.remotePlatform);
+        }
         if (elDiagIceServers) elDiagIceServers.textContent = activeIceServers().map((server) => Array.isArray(server.urls) ? server.urls.join(",") : server.urls).join(" | ");
+      }
+      break;
+    }
+
+    case "session_state": {
+      const inferred = remotePlatformFromBackend(msg.backend || '');
+      if (inferred !== 'unknown' || typeof msg.clipboard_read === 'boolean') {
+        setCurrentRemotePlatform(inferred, typeof msg.clipboard_read === 'boolean' ? msg.clipboard_read : undefined);
       }
       break;
     }
@@ -4622,6 +4759,8 @@ function startSession(params) {
     iceServers,
     viewerClient,
     launchMode,
+    remotePlatform: normalizeRemotePlatform(params.remote_platform || params.remotePlatform || ''),
+    clipboardReadSupported: null,
     isConnectSession: /\/connect\/viewer\/ws(?:\?|$)/i.test(String(wssUrl || ''))
   };
   connectFileAccessGranted = false;
@@ -4661,8 +4800,7 @@ function startSession(params) {
   setRemoteAudioEnabled(false);
   setLocalInputBlocked(false, false);
   if (elBtnKeyboard) elBtnKeyboard.disabled = false;
-  if (elMobileClipboardPaste) elMobileClipboardPaste.disabled = false;
-  if (elMobileClipboardCopy) elMobileClipboardCopy.disabled = false;
+  updateMobileClipboardAvailability();
   if (elBtnBackstage) {
     elBtnBackstage.hidden = launchMode !== "backstage";
     elBtnBackstage.disabled = true;
