@@ -115,6 +115,18 @@ function deviceIsOnline(device) {
   return Boolean(device?.agentDeviceId) && String(device?.status || '').toLowerCase() === 'online'
 }
 
+function agentVersionAtLeast(value, minimum) {
+  const current = String(value || '').match(/\d+(?:\.\d+){1,3}/)?.[0]?.split('.').map(Number) || []
+  const target = String(minimum || '').match(/\d+(?:\.\d+){1,3}/)?.[0]?.split('.').map(Number) || []
+  const length = Math.max(current.length, target.length)
+  for (let index = 0; index < length; index += 1) {
+    const left = current[index] || 0
+    const right = target[index] || 0
+    if (left !== right) return left > right
+  }
+  return target.length > 0
+}
+
 function healthClass(value = '') {
   const normalized = String(value).toLowerCase()
   if (['critical', 'failed'].includes(normalized)) return 'critical'
@@ -1789,6 +1801,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   const [remoteState, setRemoteState] = useState('')
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [remoteBusyMode, setRemoteBusyMode] = useState('')
+  const [waylandPersistence, setWaylandPersistence] = useState(false)
+  const [forgetWaylandBusy, setForgetWaylandBusy] = useState(false)
   const [viewerInstallPrompt, setViewerInstallPrompt] = useState(null)
   const [powerBusy, setPowerBusy] = useState(false)
   const [monitoringResolution, setMonitoringResolution] = useState(null)
@@ -1804,6 +1818,14 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     || (device.user && ticket.requester === device.user)
   ))
   const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const devicePlatformText = [
+    device.platform,
+    device.os,
+    device.operatingSystem,
+    device.operating_system,
+  ].filter(Boolean).join(' ').toLowerCase()
+  const isLinuxDevice = /linux|fedora|ubuntu|debian|rhel|centos|rocky|alma|opensuse|suse/.test(devicePlatformText)
+  const waylandPersistenceSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.151')
 
   useEffect(() => {
     prefetchDeviceHistory(device).catch(() => {})
@@ -1812,6 +1834,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   useEffect(() => {
     setSection(initialSection || 'overview')
     setTool(initialSection === 'tools' ? (initialTool || '') : '')
+    setWaylandPersistence(false)
   }, [device.id, initialSection, initialTool])
 
   useEffect(() => {
@@ -2030,6 +2053,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           viewerDeviceClass: viewerTarget.deviceClass,
           viewerDetection: viewerTarget.reason,
           viewerPlatform: viewerTarget.platform,
+          waylandPersistence: mode === 'console' && waylandPersistenceSupported && waylandPersistence,
         }),
       })
       const payload = await response.json().catch(() => ({}))
@@ -2065,6 +2089,32 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     } finally {
       setRemoteBusy(false)
       setRemoteBusyMode('')
+    }
+  }
+
+  async function forgetRememberedWaylandAccess() {
+    if (!isLinuxDevice || !device.agentDeviceId || forgetWaylandBusy) return
+    if (!window.confirm('Forget remembered Wayland access for the currently logged-in Linux user? The next persistent remote session will require local approval again.')) return
+
+    setForgetWaylandBusy(true)
+    setRemoteState('Clearing remembered Wayland access…')
+    try {
+      const response = await fetch(
+        apiBase + '/api/v1/rmm/devices/' + encodeURIComponent(device.agentDeviceId) + '/wayland-persistence/forget',
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to forget remembered Wayland access.')
+      setWaylandPersistence(false)
+      setRemoteState(payload.message || 'Remembered Wayland access cleared. The next persistent session will ask for approval again.')
+    } catch (error) {
+      setRemoteState(error?.message || 'Unable to forget remembered Wayland access.')
+    } finally {
+      setForgetWaylandBusy(false)
     }
   }
 
@@ -2139,6 +2189,36 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           <button onClick={() => createIncident()} type="button"><AlertTriangle size={16} /> ITSM incident</button>
         </div>
       </header>
+
+      {isLinuxDevice && <section className="rmm-wayland-persistence-panel" aria-label="Wayland remote access options">
+        <div className="rmm-wayland-persistence-copy">
+          <span className="rmm-wayland-persistence-icon"><ShieldCheck size={17} /></span>
+          <div>
+            <strong>Persistent Wayland access <b>Limited</b></strong>
+            <small>{waylandPersistenceSupported ? 'Off uses a normal one-time Linux share prompt. When enabled, Hi5Central asks the desktop portal to remember screen, interaction and clipboard approval. Desktop-environment support varies and Linux may occasionally ask again.' : 'Requires Hi5Central Agent 0.3.151 or newer. Update the Agent before enabling remembered Wayland access.'}</small>
+          </div>
+        </div>
+        <label className="rmm-wayland-persistence-toggle">
+          <input
+            checked={waylandPersistence}
+            disabled={!hasLiveAgent || !deviceOnline || remoteBusy || !waylandPersistenceSupported}
+            onChange={(event) => setWaylandPersistence(event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            <strong>Remember access for this remote session</strong>
+            <small>{!waylandPersistenceSupported ? 'Agent update required.' : waylandPersistence ? 'Persistent access requested · local approval is required the first time.' : 'One-time session · remembered permission will not be used.'}</small>
+          </span>
+        </label>
+        <button
+          className="rmm-wayland-forget"
+          disabled={!hasLiveAgent || !deviceOnline || forgetWaylandBusy || !waylandPersistenceSupported}
+          onClick={forgetRememberedWaylandAccess}
+          type="button"
+        >
+          <Trash2 size={14} /> {forgetWaylandBusy ? 'Forgetting…' : 'Forget remembered access'}
+        </button>
+      </section>}
 
       {deviceOffline && <div className="rmm-device-offline-banner"><WifiOff size={17} /><div><strong>Device offline</strong><span>Live controls are disabled and no new Agent jobs will be queued. Last-known inventory, Activity, Jobs and ITSM history remain available.</span></div><small>Last seen {device.lastSeen || 'not reported'}</small></div>}
       {!hasLiveAgent && <div className="rmm-device-offline-banner agentless"><Monitor size={17} /><div><strong>Hi5Central Agent not installed</strong><span>This device can show synchronized inventory, but live RMM controls require the Hi5Central Agent.</span></div></div>}
