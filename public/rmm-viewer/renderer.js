@@ -927,6 +927,88 @@ function remotePlatformLabel(platform = currentRemotePlatform()) {
   return 'Remote';
 }
 
+function setToolbarAction(button, { hidden, disabled, glyph, label, title } = {}) {
+  if (!button) return;
+  if (typeof hidden === 'boolean') button.hidden = hidden;
+  if (typeof disabled === 'boolean') button.disabled = disabled;
+  if (glyph !== undefined || label !== undefined) {
+    const nextGlyph = glyph ?? '';
+    const nextLabel = label ?? '';
+    button.innerHTML = `${nextGlyph}<span class="label">${nextLabel}</span>`;
+  }
+  if (title) {
+    button.title = title;
+    button.setAttribute('aria-label', title);
+  }
+}
+
+function updatePlatformToolbar() {
+  if (!currentSession) return;
+  const platform = currentRemotePlatform();
+  const resolved = platform !== 'unknown';
+  const isWindows = platform === 'windows';
+  const isLinux = platform === 'linux';
+  const isMac = platform === 'macos';
+
+  // These controls depend on Windows-only agent/service capabilities today.
+  if (resolved && !isWindows) {
+    setToolbarAction(elBtnElevate, { hidden: true, disabled: true });
+    setToolbarAction(elBtnAudio, { hidden: true, disabled: true });
+    setToolbarAction(elBtnBlockInput, { hidden: true, disabled: true });
+    setToolbarAction(elBtnBackstage, { hidden: true, disabled: true });
+    setToolbarAction(elBtnCad, { hidden: true, disabled: true });
+  } else if (isWindows) {
+    if (elBtnAudio) elBtnAudio.hidden = false;
+    if (elBtnBlockInput) elBtnBlockInput.hidden = false;
+    if (elBtnCad) elBtnCad.hidden = false;
+    if (elBtnBackstage) elBtnBackstage.hidden = currentSession.launchMode !== 'backstage';
+  }
+
+  if (isLinux) {
+    setToolbarAction(elBtnStartMenu, {
+      hidden: false,
+      disabled: false,
+      glyph: 'Super',
+      label: 'Super',
+      title: 'Linux Super / Activities'
+    });
+    setToolbarAction(elBtnConsole, {
+      glyph: '🖥️',
+      label: 'Linux',
+      title: 'Linux desktop'
+    });
+  } else if (isMac) {
+    // macOS has no Start-menu equivalent. Command remains available on the
+    // OS-aware remote keyboard where it behaves as a modifier.
+    setToolbarAction(elBtnStartMenu, { hidden: true, disabled: true });
+    setToolbarAction(elBtnConsole, {
+      glyph: '🖥️',
+      label: 'macOS',
+      title: 'macOS desktop'
+    });
+  } else {
+    setToolbarAction(elBtnStartMenu, {
+      hidden: false,
+      glyph: '⊞',
+      label: 'Start',
+      title: 'Start Menu'
+    });
+    setToolbarAction(elBtnConsole, {
+      glyph: '🖥️',
+      label: 'Console',
+      title: isWindows ? 'Windows console desktop' : 'Console Desktop'
+    });
+    if (isWindows) {
+      setToolbarAction(elBtnCad, {
+        hidden: false,
+        glyph: '⌨',
+        label: 'CAD',
+        title: 'Ctrl+Alt+Del'
+      });
+    }
+  }
+}
+
 function setCurrentRemotePlatform(value, clipboardReadSupported = undefined) {
   if (!currentSession) return;
   const normalized = normalizeRemotePlatform(value);
@@ -934,6 +1016,7 @@ function setCurrentRemotePlatform(value, clipboardReadSupported = undefined) {
   if (typeof clipboardReadSupported === 'boolean') {
     currentSession.clipboardReadSupported = clipboardReadSupported;
   }
+  updatePlatformToolbar();
   renderMobileKeyboard();
   updateMobileClipboardAvailability();
 }
@@ -1710,10 +1793,12 @@ function postFileToNativeWindow(msg) {
 }
 
 function updateConnectCapabilityButtons() {
+  const platform = currentRemotePlatform();
+  const windowsOrUnknown = platform === 'windows' || platform === 'unknown';
   if (elBtnElevate) {
     const isConnect = !!currentSession?.isConnectSession;
-    elBtnElevate.hidden = !isConnect;
-    elBtnElevate.disabled = !isConnect || connectElevationPending || connectElevated || connectHostReconnecting || connectSessionHeld;
+    elBtnElevate.hidden = !isConnect || !windowsOrUnknown;
+    elBtnElevate.disabled = !isConnect || !windowsOrUnknown || connectElevationPending || connectElevated || connectHostReconnecting || connectSessionHeld;
     const label = elBtnElevate.querySelector(".label");
     if (label) label.textContent = connectElevated ? "Admin active" : (connectElevationPending ? "Admin…" : "Admin");
     elBtnElevate.title = connectElevated
@@ -1727,7 +1812,8 @@ function updateConnectCapabilityButtons() {
       : (connectFilePermissionPending ? "Waiting for customer file-access approval" : "Request file access");
   }
   if (elBtnCad && currentSession?.isConnectSession) {
-    elBtnCad.disabled = !connectElevated || connectElevationPending || connectHostReconnecting || connectSessionHeld;
+    elBtnCad.hidden = !windowsOrUnknown;
+    elBtnCad.disabled = !windowsOrUnknown || !connectElevated || connectElevationPending || connectHostReconnecting || connectSessionHeld;
     elBtnCad.title = connectElevated
       ? "Ctrl+Alt+Del"
       : "Administrator access is required for Ctrl+Alt+Del";
@@ -2550,6 +2636,22 @@ function setLocalInputBlocked(blocked, notifyAgent = true) {
     sendInput("local_input_block", { blocked: localInputBlocked }, true);
   }
   updateSessionToggleButtons();
+}
+
+function sendSystemMenuAction() {
+  if (!currentSession) return false;
+  const platform = currentRemotePlatform();
+  enterRemoteControlMode();
+
+  if (platform === 'linux') {
+    const flags = { ctrl: false, alt: false, shift: false, meta: true };
+    sendInput('key_down', { code: 'MetaLeft', key: 'Meta', repeat: false, ...flags }, true);
+    sendInput('key_up', { code: 'MetaLeft', key: 'Meta', ...flags }, true);
+    return true;
+  }
+
+  if (platform === 'macos') return false;
+  return sendShortcut('start_menu');
 }
 
 function sendShortcut(action) {
@@ -4868,6 +4970,7 @@ function startSession(params) {
   }
   if (elBtnStartMenu) elBtnStartMenu.disabled = false;
   if (elBtnCad) elBtnCad.disabled = !!currentSession.isConnectSession;
+  updatePlatformToolbar();
   updateConnectCapabilityButtons();
   if (elDeviceLabel) elDeviceLabel.textContent = deviceId || "";
 
@@ -4887,7 +4990,7 @@ if (elBtnConsole) {
   elBtnConsole.addEventListener("click", () => sendBackstageMode(false));
 }
 if (elBtnStartMenu) {
-  elBtnStartMenu.addEventListener("click", () => sendShortcut("start_menu"));
+  elBtnStartMenu.addEventListener("click", sendSystemMenuAction);
 }
 if (elBtnCad) {
   elBtnCad.addEventListener("click", () => sendShortcut("ctrl_alt_del"));
