@@ -47,7 +47,7 @@ function selectionLabel(pkg) {
 function installCommand(pkg) {
   const format = pkg?.installer_format
   if (format === 'exe') {
-    return '.\\Hi5CentralAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DEPLOYMENT_CONFIG=".\\Hi5CentralDeployment.json" /INSTALL_SOURCE="deployment-json"'
+    return '.\\Hi5CentralAgent.exe --quiet'
   }
   if (format === 'msi') {
     return 'msiexec /i "Hi5CentralAgentDeployment-Windows.msi" /qn HI5DEPLOYMENTCONFIG="%CD%\\Hi5CentralDeployment.json"'
@@ -77,7 +77,7 @@ export function RmmAgentDeployment() {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState('')
   const [selectedPlatform, setSelectedPlatform] = useState('windows')
-  const [selectedFormat, setSelectedFormat] = useState('msi')
+  const [selectedFormat, setSelectedFormat] = useState('exe')
 
   async function load() {
     setError('')
@@ -217,7 +217,7 @@ export function RmmAgentDeployment() {
         <div>
           <span className="rmm-eyebrow">Administration</span>
           <h1>Agent deployment</h1>
-          <p>Choose an operating system and installer type. Hi5Central reuses the same native installer and creates a tenant-specific revocable deployment JSON.</p>
+          <p>Choose an operating system and installer type. Windows EXE downloads as a single tenant-aware Hi5CentralAgent.exe and can be installed offline.</p>
         </div>
         <button className="rmm-secondary compact" disabled={busy} onClick={createOneTimeToken} type="button">
           <ShieldCheck size={16} /> {busy ? 'Working…' : 'Generate one-time token'}
@@ -262,8 +262,8 @@ export function RmmAgentDeployment() {
         <div className="rmm-agent-shared-installer-note">
           <CheckCircle2 size={16} />
           <div>
-            <strong>No tenant-specific binary build</strong>
-            <span>The EXE/MSI/PKG/DMG/APP/RUN/DEB/RPM is shared. Only Hi5CentralDeployment.json is tenant-specific and revocable.</span>
+            <strong>Single-file Windows EXE</strong>
+            <span>The VPS stamps the tenant deployment credential into Hi5CentralAgent.exe instantly. No JSON file, .NET runtime or per-tenant GitHub build is required.</span>
           </div>
         </div>
       </section>
@@ -282,15 +282,19 @@ export function RmmAgentDeployment() {
             <>
               <p>
                 This installer can enrol any number of devices for this tenant until you revoke record <strong>{issued.package.id}</strong>.
-                The native installer itself is shared; the JSON contains the revocable tenant credential.
+                {issued.package.installer_format === 'exe'
+                  ? ' The downloaded Hi5CentralAgent.exe already contains its revocable tenant credential and can be copied to an offline device.'
+                  : ' This installer currently uses the deployment configuration shown below.'}
               </p>
               <div className="rmm-agent-issued-actions">
                 <button className="rmm-primary compact" onClick={() => downloadUrl(issued.installer?.url)} type="button">
                   <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}
                 </button>
-                <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
-                  <Download size={15} /> Download JSON
-                </button>
+                {issued.package.installer_format !== 'exe' ? (
+                  <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
+                    <Download size={15} /> Download JSON
+                  </button>
+                ) : null}
                 {installCommand(issued.package) ? (
                   <button className="rmm-secondary compact" onClick={() => copyText(installCommand(issued.package), 'command')} type="button">
                     <Copy size={15} /> {copied === 'command' ? 'Copied' : 'Copy deployment command'}
@@ -345,9 +349,11 @@ export function RmmAgentDeployment() {
                       <button className="rmm-secondary compact" onClick={() => downloadUrl(pkg.installer_url)} type="button">
                         <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}
                       </button>
-                      <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(pkg)} type="button">
-                        <Download size={14} /> JSON
-                      </button>
+                      {pkg.installer_format !== 'exe' ? (
+                        <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(pkg)} type="button">
+                          <Download size={14} /> JSON
+                        </button>
+                      ) : null}
                       <button className="rmm-secondary compact" onClick={() => copyText(installCommand(pkg), `command:${pkg.id}`)} type="button">
                         <Copy size={14} /> {copied === `command:${pkg.id}` ? 'Copied' : 'Command'}
                       </button>
