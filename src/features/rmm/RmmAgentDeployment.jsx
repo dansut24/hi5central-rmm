@@ -40,7 +40,7 @@ function packageState(pkg) {
   if (pkg.persistent) return 'Active'
   if (new Date(pkg.expires_at).getTime() <= Date.now()) return 'Expired'
   if (Number(pkg.use_count) >= Number(pkg.max_uses)) return 'Used'
-  return 'Legacy active'
+  return 'One-time active'
 }
 
 function dateText(value) {
@@ -128,7 +128,7 @@ export function RmmAgentDeployment() {
     }
   }, [packages])
 
-  async function createPackage() {
+  async function createPackage(persistent = true) {
     setBusy(true)
     setError('')
     setCopied('')
@@ -137,15 +137,24 @@ export function RmmAgentDeployment() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: 'Hi5Central tenant Agent deployment',
-          persistent: true,
-        }),
+        body: JSON.stringify(persistent
+          ? {
+              label: 'Hi5Central bulk Agent deployment',
+              persistent: true,
+            }
+          : {
+              label: 'One-time Agent enrollment',
+              persistent: false,
+              ttlMinutes: 60,
+              maxUses: 1,
+            }),
       })
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || 'Unable to create tenant Agent deployment.')
+      if (!response.ok) throw new Error(payload.error || (persistent
+        ? 'Unable to create bulk Agent deployment.'
+        : 'Unable to create one-time enrollment token.'))
       setIssued(payload)
-      if (payload.package?.id) {
+      if (persistent && payload.package?.id) {
         setArtifactStatus((current) => ({
           ...current,
           [payload.package.id]: {
@@ -261,6 +270,18 @@ export function RmmAgentDeployment() {
     }
   }
 
+  async function copyEnrollmentToken() {
+    const token = issued?.enrollmentToken || ''
+    if (!token) return
+    try {
+      await navigator.clipboard.writeText(token)
+      setCopied('token')
+      window.setTimeout(() => setCopied((current) => current === 'token' ? '' : current), 1800)
+    } catch {
+      setError('Could not copy the enrollment token. Select and copy it manually.')
+    }
+  }
+
   function artifactButtons(packageId, platform) {
     const status = artifactStatus[packageId]
     return (
@@ -308,11 +329,16 @@ export function RmmAgentDeployment() {
         <div>
           <span className="rmm-eyebrow">Administration</span>
           <h1>Agent deployment</h1>
-          <p>Create reusable tenant-aware Agent installers. They remain downloadable and can enroll new devices until you revoke the deployment.</p>
+          <p>Create revocable bulk installers for managed rollout, or issue a short-lived one-time token for a single device.</p>
         </div>
-        <button className="rmm-primary compact" disabled={busy} onClick={createPackage} type="button">
-          <ShieldCheck size={16} /> {busy ? 'Working…' : 'Create tenant deployment'}
-        </button>
+        <div className="rmm-agent-heading-actions">
+          <button className="rmm-secondary compact" disabled={busy} onClick={() => createPackage(false)} type="button">
+            <ShieldCheck size={16} /> {busy ? 'Working…' : 'Generate one-time token'}
+          </button>
+          <button className="rmm-primary compact" disabled={busy} onClick={() => createPackage(true)} type="button">
+            <ShieldCheck size={16} /> {busy ? 'Working…' : 'Create bulk deployment'}
+          </button>
+        </div>
       </div>
 
       {error ? <div className="rmm-agent-error">{error}</div> : null}
@@ -323,42 +349,69 @@ export function RmmAgentDeployment() {
             <span className="rmm-eyebrow">{meta.eyebrow}</span>
             <h2>Hi5Central Agent</h2>
             <p>{meta.description}</p>
-            {issued?.package?.id
+            {issued?.package?.persistent && issued?.package?.id
               ? artifactButtons(issued.package.id, platform)
-              : <small>Create a tenant deployment to enable native downloads.</small>}
+              : <small>Create a bulk deployment to enable reusable native downloads.</small>}
           </section>
         ))}
 
         <section className="rmm-card rmm-agent-security-card">
           <span className="rmm-eyebrow">Enrollment security</span>
-          <h2>Revocable tenant deployment</h2>
-          <p>Each installer carries a deployment-scoped credential bound to this tenant. It can enroll multiple devices until the deployment is revoked.</p>
-          <div><CheckCircle2 size={15} /> Reusable until explicitly revoked</div>
-          <div><CheckCircle2 size={15} /> Revocation blocks old downloaded copies</div>
-          <div><CheckCircle2 size={15} /> Unique device secret issued after enrollment</div>
+          <h2>Two enrollment modes</h2>
+          <p>Use a revocable bulk deployment for Intune, Ivanti, MDM/RMM and imaging. Use a one-time token for an individual manual enrollment.</p>
+          <div><CheckCircle2 size={15} /> Bulk deployment remains reusable until explicitly revoked</div>
+          <div><CheckCircle2 size={15} /> One-time token expires after 60 minutes and works once</div>
+          <div><CheckCircle2 size={15} /> Every enrolled device receives its own unique device secret</div>
         </section>
       </div>
 
       {issued ? (
         <section className="rmm-card rmm-agent-issued-card">
           <div className="rmm-card-heading">
-            <div><span className="rmm-eyebrow">Just created</span><h2>Tenant Agent deployment</h2></div>
+            <div>
+              <span className="rmm-eyebrow">Just created</span>
+              <h2>{issued.package?.persistent ? 'Bulk Agent deployment' : 'One-time enrollment token'}</h2>
+            </div>
             <button onClick={() => setIssued(null)} type="button"><X size={16} /></button>
           </div>
-          <p>Deployment <strong>{issued.package?.id}</strong> is active until you revoke it. Download any installer format now or later from the deployment history.</p>
-          {artifactStatus[issued.package?.id]?.buildError ? (
-            <div className="rmm-agent-build-state error">
-              Installer build failed: {artifactStatus[issued.package.id].buildError}
-              <button disabled={busy} onClick={() => retryArtifactBuild(issued.package.id)} type="button">
-                Retry build
-              </button>
-            </div>
-          ) : artifactStatus[issued.package?.id]?.status !== 'ready' ? (
-            <div className="rmm-agent-build-state">
-              Building native installers… {artifactStatus[issued.package?.id]?.readyCount || 0}/{artifactStatus[issued.package?.id]?.totalCount || 7} ready
-            </div>
+
+          {issued.package?.persistent ? (
+            <>
+              <p>
+                Deployment <strong>{issued.package?.id}</strong> is active until you revoke it.
+                Download any installer format now or later from the deployment history.
+              </p>
+              {artifactStatus[issued.package?.id]?.buildError ? (
+                <div className="rmm-agent-build-state error">
+                  Installer build failed: {artifactStatus[issued.package.id].buildError}
+                  <button disabled={busy} onClick={() => retryArtifactBuild(issued.package.id)} type="button">
+                    Retry build
+                  </button>
+                </div>
+              ) : artifactStatus[issued.package?.id]?.status !== 'ready' ? (
+                <div className="rmm-agent-build-state">
+                  Building native installers… {artifactStatus[issued.package?.id]?.readyCount || 0}/{artifactStatus[issued.package?.id]?.totalCount || 8} ready
+                </div>
+              ) : (
+                <div className="rmm-agent-build-state ready">All native installers are ready to download.</div>
+              )}
+            </>
           ) : (
-            <div className="rmm-agent-build-state ready">All native installers are ready to download.</div>
+            <>
+              <p>
+                This token works once and expires at <strong>{dateText(issued.package?.expires_at)}</strong>.
+                Use it for a single manual enrollment; generate another token for another device.
+              </p>
+              <div className="rmm-agent-command-group">
+                <strong>Enrollment token</strong>
+                <div className="rmm-agent-command">
+                  <code>{issued.enrollmentToken}</code>
+                  <button onClick={copyEnrollmentToken} type="button">
+                    <Copy size={15} /> {copied === 'token' ? 'Copied' : 'Copy token'}
+                  </button>
+                </div>
+              </div>
+            </>
           )}
 
           <div className="rmm-agent-command-list">
@@ -401,7 +454,7 @@ export function RmmAgentDeployment() {
                 : build?.status === 'ready'
                   ? 'Installers ready'
                   : build
-                    ? `Building ${build.readyCount || 0}/${build.totalCount || 7}`
+                    ? `Building ${build.readyCount || 0}/${build.totalCount || 8}`
                     : 'Checking installers…'
             return (
               <div className="rmm-agent-package-row" key={pkg.id}>
@@ -420,7 +473,7 @@ export function RmmAgentDeployment() {
                       ) : null}
                       <button disabled={busy} onClick={() => revokePackage(pkg.id)} type="button">Revoke</button>
                     </div>
-                  ) : state === 'Legacy active' ? (
+                  ) : state === 'One-time active' ? (
                     <button disabled={busy} onClick={() => revokePackage(pkg.id)} type="button">Revoke</button>
                   ) : null}
                 </span>
