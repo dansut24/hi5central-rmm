@@ -168,6 +168,39 @@ function osScheduleTone(decision) {
   return 'neutral'
 }
 
+function vulnerabilityExposureTypeLabel(exposure) {
+  if (exposure?.exposure_class === 'os') return exposure?.platform === 'macos' ? 'macOS' : 'Operating system'
+  if (exposure?.exposure_class === 'os_package') return 'OS package'
+  return 'Application'
+}
+
+function vulnerabilityRiskLabel(exposure) {
+  if (exposure?.kev) return 'CISA KEV'
+  const score = Number(exposure?.cvss_score || 0)
+  if (score >= 9) return 'Critical'
+  if (score >= 7) return 'High'
+  if (score >= 4) return 'Medium'
+  if (score > 0) return 'Low'
+  return exposure?.severity || 'Observed'
+}
+
+function vulnerabilityRiskTone(exposure) {
+  if (exposure?.kev || Number(exposure?.cvss_score || 0) >= 9) return 'critical'
+  if (Number(exposure?.cvss_score || 0) >= 7) return 'warning'
+  if (exposure?.remediation_state === 'available') return 'running'
+  return 'neutral'
+}
+
+function vulnerabilityRemediationLabel(exposure) {
+  if (exposure?.remediation_state === 'available') {
+    return exposure?.remediation_domain === 'os' ? 'Patch OS' : 'Patch application'
+  }
+  if (exposure?.remediation_state === 'in_progress') return 'In progress'
+  if (exposure?.remediation_state === 'remediated') return 'Remediated'
+  if (exposure?.remediation_state === 'review') return 'Review'
+  return 'No verified fix'
+}
+
 function osScheduleLabel(decision) {
   if (!decision) return 'Awaiting evaluation'
   if (decision.action === 'install') return decision.dispatched ? 'Install dispatched' : 'Install eligible'
@@ -1294,6 +1327,9 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
   const [bulkPatchBusy, setBulkPatchBusy] = useState(false)
   const [softwareSearch, setSoftwareSearch] = useState('')
   const [softwareStateFilter, setSoftwareStateFilter] = useState('all')
+  const [vulnerabilitySearch, setVulnerabilitySearch] = useState('')
+  const [vulnerabilityClassFilter, setVulnerabilityClassFilter] = useState('all')
+  const [vulnerabilityStatusFilter, setVulnerabilityStatusFilter] = useState('open')
   const [softwareProviderFilter, setSoftwareProviderFilter] = useState('all')
   const [softwareSourceFilter, setSoftwareSourceFilter] = useState('all')
   const [softwareHealthFilter, setSoftwareHealthFilter] = useState('all')
@@ -1459,6 +1495,20 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
   const qualificationProgress = bundle?.qualificationProgress || {}
   const qualificationFailureGroups = qualificationProgress.failureGroups || []
   const exposureSummary = bundle?.vulnerabilityExposures || {}
+  const vulnerabilitySearchText = vulnerabilitySearch.trim().toLowerCase()
+  const filteredVulnerabilityExposures = vulnerabilityExposureRows.filter((exposure) => {
+    if (vulnerabilityStatusFilter !== 'all' && exposure.status !== vulnerabilityStatusFilter) return false
+    if (vulnerabilityClassFilter !== 'all' && exposure.exposure_class !== vulnerabilityClassFilter) return false
+    if (!vulnerabilitySearchText) return true
+    return [
+      exposure.cve_id,
+      exposure.application_name,
+      exposure.package_name,
+      exposure.device_name,
+      exposure.device_reference,
+      exposure.operating_system,
+    ].filter(Boolean).join(' ').toLowerCase().includes(vulnerabilitySearchText)
+  })
   const overview = bundle?.overview || {}
   const exposedApps = applications.filter((item) => item.updateAvailable > 0)
   const mappedApps = applications.filter((item) => item.catalogue)
@@ -2147,6 +2197,7 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
       {[
         ['catalogue', 'Catalogue', catalogueFeed.total ?? catalogue.length],
         ['windows', 'OS Updates', osPending],
+        ['vulnerabilities', 'Vulnerabilities', Number(exposureSummary.open || 0)],
         ['policies', 'Policies', policies.length],
       ].map(([id, label, count]) => <button className={tab === id ? 'active' : ''} key={id} onClick={() => setTab(id)} type="button">{label}<b>{count}</b></button>)}
     </nav>}
@@ -2437,6 +2488,58 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
       </div>
       {!windowsByDevice.length && <div className="rmm-empty"><Monitor size={24} /><strong>{loading ? 'Loading Windows Update inventory…' : 'No pending Windows updates'}</strong><span>Applicable Windows updates are populated by managed Agent inventory scans.</span></div>}
       <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>Scheduled installs are server-authoritative. Offline devices are not left with queued update jobs; they are re-evaluated when online. Feature and driver updates remain excluded unless the assigned policy explicitly enables them.</span></div>
+    </section>}
+    {tab === 'vulnerabilities' && <section className="rmm-patch-panel">
+      <div className="rmm-card-heading">
+        <div><span className="rmm-eyebrow">Cross-platform exposure management</span><h2>Vulnerabilities</h2><p>Application CVEs remain in Software Patching. Native Linux packages and macOS security exposures are kept separate and remediate through OS Patching.</p></div>
+        <button disabled={loading} onClick={refresh} type="button"><RefreshCw size={14} /> Refresh</button>
+      </div>
+
+      <div className="rmm-windows-summary">
+        <article><small>Open</small><strong>{exposureSummary.open || 0}</strong><span>{exposureSummary.fix_available_open || 0} with verified remediation</span></article>
+        <article><small>Applications</small><strong>{exposureSummary.application_open || 0}</strong><span>Software-patching domain</span></article>
+        <article><small>OS packages</small><strong>{exposureSummary.os_package_open || 0}</strong><span>Linux APT / DNF packages</span></article>
+        <article><small>Native OS</small><strong>{exposureSummary.os_open || 0}</strong><span>macOS security releases</span></article>
+        <article><small>Critical</small><strong>{exposureSummary.critical_open || 0}</strong><span>CVSS 9.0+</span></article>
+        <article><small>CISA KEV</small><strong>{exposureSummary.kev_open || 0}</strong><span>Known exploited vulnerabilities</span></article>
+      </div>
+
+      <div className="rmm-catalogue-toolbar">
+        <label className="search"><Search size={14} /><input value={vulnerabilitySearch} onChange={(event) => setVulnerabilitySearch(event.target.value)} placeholder="Search CVE, device, application or package…" /></label>
+        <select aria-label="Vulnerability class" value={vulnerabilityClassFilter} onChange={(event) => setVulnerabilityClassFilter(event.target.value)}>
+          <option value="all">All exposure types</option>
+          <option value="application">Applications</option>
+          <option value="os_package">OS packages</option>
+          <option value="os">Native OS</option>
+        </select>
+        <select aria-label="Vulnerability status" value={vulnerabilityStatusFilter} onChange={(event) => setVulnerabilityStatusFilter(event.target.value)}>
+          <option value="open">Open</option>
+          <option value="review">Review</option>
+          <option value="remediated">Remediated</option>
+          <option value="all">All states</option>
+        </select>
+        <span className="summary">{filteredVulnerabilityExposures.length} exposure{filteredVulnerabilityExposures.length === 1 ? '' : 's'}</span>
+      </div>
+
+      <div className="rmm-patch-table windows scheduled">
+        <div className="head"><span>Exposure</span><span>Device</span><span>Type</span><span>Version / fix</span><span>Risk</span><span>Remediation</span></div>
+        {filteredVulnerabilityExposures.map((exposure) => {
+          const osDomain = exposure.remediation_domain === 'os'
+          const canRemediate = exposure.status === 'open' && exposure.remediation_state === 'available' && exposure.device_online
+          const busy = remediatingExposureId === exposure.id
+          const provider = exposure.remediation_provider || exposure.package_manager || (osDomain ? 'Native updater' : 'Software catalogue')
+          return <div className="row" key={exposure.id}>
+            <span><strong>{exposure.cve_id}</strong><small>{exposure.application_name || exposure.package_name || 'Exposure'}{exposure.kev ? ' · CISA KEV' : ''}</small></span>
+            <span><strong>{exposure.device_name || exposure.device_reference}</strong><small>{exposure.operating_system || exposure.platform || 'Managed endpoint'} · {exposure.device_online ? 'Online' : 'Offline'}</small></span>
+            <span><StatusPill tone={osDomain ? 'running' : 'neutral'}>{vulnerabilityExposureTypeLabel(exposure)}</StatusPill><small>{osDomain ? 'OS patch policy' : 'Software patch policy'}{exposure.package_manager ? ' · ' + exposure.package_manager.toUpperCase() : ''}</small></span>
+            <span><strong>{exposure.installed_version || 'Unknown'}{exposure.fixed_version ? ' → ' + exposure.fixed_version : ''}</strong><small>{exposure.remediation_target_version && exposure.remediation_target_version !== exposure.fixed_version ? 'Remediation target ' + exposure.remediation_target_version : exposure.remediation_target_version ? 'Verified target' : 'Fixed version not yet deployable'}</small></span>
+            <span><StatusPill tone={vulnerabilityRiskTone(exposure)}>{vulnerabilityRiskLabel(exposure)}</StatusPill><small>{exposure.cvss_score ? 'CVSS ' + exposure.cvss_score : 'CVSS pending'}{exposure.epss_score ? ' · EPSS ' + (Number(exposure.epss_score) * 100).toFixed(1) + '%' : ''}</small></span>
+            <span><div className="rmm-row-actions"><button className={canRemediate ? 'rmm-primary compact' : ''} disabled={!canRemediate || busy} onClick={() => remediateExposure(exposure)} type="button">{busy ? 'Starting…' : vulnerabilityRemediationLabel(exposure)}</button></div><small>{provider}{exposure.remediation_due_at ? ' · due ' + new Date(exposure.remediation_due_at).toLocaleDateString() : ''}</small></span>
+          </div>
+        })}
+      </div>
+      {!filteredVulnerabilityExposures.length && <div className="rmm-empty"><ShieldCheck size={24} /><strong>No vulnerability exposures match this view</strong><span>Application and native OS/package CVEs are kept separate and routed to the correct remediation domain.</span></div>}
+      <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>Linux system-package CVEs are never treated as ordinary uninstallable applications. macOS OS CVEs are matched to Apple security releases; major macOS upgrades remain excluded from automatic remediation.</span></div>
     </section>}
     {tab === 'policies' && <section className="rmm-patch-panel rmm-policy-lists">
       <section className="rmm-policy-list-section">
