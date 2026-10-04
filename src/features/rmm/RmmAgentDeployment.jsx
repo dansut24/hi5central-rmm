@@ -5,7 +5,8 @@ const API_BASE = window.__HI5_API_BASE__ || ''
 
 const PLATFORM_FORMATS = {
   windows: [
-    { format: 'exe', label: 'EXE', detail: 'Single-file native installer for manual, scripted, Intune, Ivanti, GPO and managed deployment' },
+    { format: 'exe', label: 'EXE', detail: 'Single-file native installer for manual, scripted and managed deployment' },
+    { format: 'msi', label: 'MSI', detail: 'Tenant-stamped Windows Installer for Intune, Ivanti, GPO and managed deployment' },
   ],
   macos: [
     { format: 'pkg', label: 'PKG', detail: 'Recommended for MDM and managed deployment' },
@@ -44,10 +45,15 @@ function selectionLabel(pkg) {
   return `${platform} ${String(pkg.installer_format || '').toUpperCase()}`.trim()
 }
 
-function installCommand(pkg) {
+function installCommand(pkg, serverCommand = '') {
+  if (serverCommand) return serverCommand
+  if (pkg?.install_command) return pkg.install_command
   const format = pkg?.installer_format
   if (format === 'exe') {
     return '.\\Hi5CentralAgent.exe --quiet'
+  }
+  if (format === 'msi') {
+    return 'msiexec /i "Hi5CentralAgent.msi" /qn /norestart'
   }
   if (format === 'run') {
     return 'sudo ./Hi5CentralAgentDeployment-Linux.run --config ./Hi5CentralDeployment.json'
@@ -214,7 +220,7 @@ export function RmmAgentDeployment() {
         <div>
           <span className="rmm-eyebrow">Administration</span>
           <h1>Agent deployment</h1>
-          <p>Choose an operating system and installer type. Windows EXE downloads as a single tenant-aware Hi5CentralAgent.exe and can be installed offline.</p>
+          <p>Choose an operating system and installer type. Windows EXE and MSI are tenant-aware, revocable and can be deployed without a JSON sidecar.</p>
         </div>
         <button className="rmm-secondary compact" disabled={busy} onClick={createOneTimeToken} type="button">
           <ShieldCheck size={16} /> {busy ? 'Working…' : 'Generate one-time token'}
@@ -259,8 +265,8 @@ export function RmmAgentDeployment() {
         <div className="rmm-agent-shared-installer-note">
           <CheckCircle2 size={16} />
           <div>
-            <strong>Single-file Windows EXE</strong>
-            <span>The VPS stamps the tenant deployment credential into Hi5CentralAgent.exe instantly. No JSON file, .NET runtime or per-tenant GitHub build is required.</span>
+            <strong>Tenant-stamped Windows EXE &amp; MSI</strong>
+            <span>The VPS stamps the revocable tenant deployment credential into the selected Windows installer instantly. No JSON file, .NET runtime or per-tenant GitHub build is required.</span>
           </div>
         </div>
       </section>
@@ -287,20 +293,20 @@ export function RmmAgentDeployment() {
                 <button className="rmm-primary compact" onClick={() => downloadUrl(issued.installer?.url)} type="button">
                   <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}
                 </button>
-                {issued.package.installer_format !== 'exe' ? (
+                {!['exe', 'msi'].includes(issued.package.installer_format) ? (
                   <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
                     <Download size={15} /> Download JSON
                   </button>
                 ) : null}
-                {installCommand(issued.package) ? (
-                  <button className="rmm-secondary compact" onClick={() => copyText(installCommand(issued.package), 'command')} type="button">
+                {installCommand(issued.package, issued.installCommand) ? (
+                  <button className="rmm-secondary compact" onClick={() => copyText(installCommand(issued.package, issued.installCommand), 'command')} type="button">
                     <Copy size={15} /> {copied === 'command' ? 'Copied' : 'Copy deployment command'}
                   </button>
                 ) : null}
                 <button disabled={busy} onClick={() => revokePackage(issued.package.id)} type="button">Revoke</button>
               </div>
               <div className="rmm-agent-command">
-                <code>{installCommand(issued.package)}</code>
+                <code>{installCommand(issued.package, issued.installCommand)}</code>
               </div>
             </>
           ) : (
