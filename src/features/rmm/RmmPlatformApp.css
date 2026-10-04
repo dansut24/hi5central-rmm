@@ -781,10 +781,16 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 
 @media (max-width: 900px) {
   .rmm-agent-deployment-grid { grid-template-columns: 1fr; }
+  .rmm-agent-builder-fields { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .rmm-agent-builder-fields > button { grid-column: 1 / -1; width: 100%; }
   .rmm-agent-package-row { grid-template-columns: minmax(140px,1.4fr) .7fr .6fr 1fr auto; }
 }
 
 @media (max-width: 640px) {
+  .rmm-agent-builder { overflow: hidden; }
+  .rmm-agent-builder-fields { grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .rmm-agent-builder-fields > button { grid-column: 1; width: 100%; }
+  .rmm-agent-builder-fields label > small { min-height: 0; }
   .rmm-agent-command { grid-template-columns: 1fr; }
   .rmm-agent-package-row.head { display: none; }
   .rmm-agent-package-row { grid-template-columns: 1fr auto; gap: 6px 10px; }
