@@ -115,6 +115,18 @@ function deviceIsOnline(device) {
   return Boolean(device?.agentDeviceId) && String(device?.status || '').toLowerCase() === 'online'
 }
 
+function agentVersionAtLeast(value, minimum) {
+  const current = String(value || '').match(/\d+(?:\.\d+){1,3}/)?.[0]?.split('.').map(Number) || []
+  const target = String(minimum || '').match(/\d+(?:\.\d+){1,3}/)?.[0]?.split('.').map(Number) || []
+  const length = Math.max(current.length, target.length)
+  for (let index = 0; index < length; index += 1) {
+    const left = current[index] || 0
+    const right = target[index] || 0
+    if (left !== right) return left > right
+  }
+  return target.length > 0
+}
+
 function healthClass(value = '') {
   const normalized = String(value).toLowerCase()
   if (['critical', 'failed'].includes(normalized)) return 'critical'
@@ -1813,6 +1825,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     device.operating_system,
   ].filter(Boolean).join(' ').toLowerCase()
   const isLinuxDevice = /linux|fedora|ubuntu|debian|rhel|centos|rocky|alma|opensuse|suse/.test(devicePlatformText)
+  const waylandPersistenceSupported = isLinuxDevice && agentVersionAtLeast(device.agent, '0.3.151')
 
   useEffect(() => {
     prefetchDeviceHistory(device).catch(() => {})
@@ -2040,7 +2053,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           viewerDeviceClass: viewerTarget.deviceClass,
           viewerDetection: viewerTarget.reason,
           viewerPlatform: viewerTarget.platform,
-          waylandPersistence: mode === 'console' && isLinuxDevice && waylandPersistence,
+          waylandPersistence: mode === 'console' && waylandPersistenceSupported && waylandPersistence,
         }),
       })
       const payload = await response.json().catch(() => ({}))
@@ -2182,24 +2195,24 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           <span className="rmm-wayland-persistence-icon"><ShieldCheck size={17} /></span>
           <div>
             <strong>Persistent Wayland access <b>Limited</b></strong>
-            <small>Off uses a normal one-time Linux share prompt. When enabled, Hi5Central asks the desktop portal to remember screen, interaction and clipboard approval. Desktop-environment support varies and Linux may occasionally ask again.</small>
+            <small>{waylandPersistenceSupported ? 'Off uses a normal one-time Linux share prompt. When enabled, Hi5Central asks the desktop portal to remember screen, interaction and clipboard approval. Desktop-environment support varies and Linux may occasionally ask again.' : 'Requires Hi5Central Agent 0.3.151 or newer. Update the Agent before enabling remembered Wayland access.'}</small>
           </div>
         </div>
         <label className="rmm-wayland-persistence-toggle">
           <input
             checked={waylandPersistence}
-            disabled={!hasLiveAgent || !deviceOnline || remoteBusy}
+            disabled={!hasLiveAgent || !deviceOnline || remoteBusy || !waylandPersistenceSupported}
             onChange={(event) => setWaylandPersistence(event.target.checked)}
             type="checkbox"
           />
           <span>
             <strong>Remember access for this remote session</strong>
-            <small>{waylandPersistence ? 'Persistent access requested · local approval is required the first time.' : 'One-time session · remembered permission will not be used.'}</small>
+            <small>{!waylandPersistenceSupported ? 'Agent update required.' : waylandPersistence ? 'Persistent access requested · local approval is required the first time.' : 'One-time session · remembered permission will not be used.'}</small>
           </span>
         </label>
         <button
           className="rmm-wayland-forget"
-          disabled={!hasLiveAgent || !deviceOnline || forgetWaylandBusy}
+          disabled={!hasLiveAgent || !deviceOnline || forgetWaylandBusy || !waylandPersistenceSupported}
           onClick={forgetRememberedWaylandAccess}
           type="button"
         >
