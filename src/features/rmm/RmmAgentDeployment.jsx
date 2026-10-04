@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { CheckCircle2, Copy, Download, RefreshCw, ShieldCheck, X } from 'lucide-react'
 
 const API_BASE = window.__HI5_API_BASE__ || ''
