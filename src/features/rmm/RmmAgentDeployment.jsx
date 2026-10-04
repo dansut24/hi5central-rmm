@@ -1,38 +1,28 @@
-import { useEffect, useState } from 'react'
 import { CheckCircle2, Copy, Download, RefreshCw, ShieldCheck, X } from 'lucide-react'
 
 const API_BASE = window.__HI5_API_BASE__ || ''
 
 const PLATFORM_FORMATS = {
   windows: [
-    { format: 'exe', label: 'EXE' },
-    { format: 'msi', label: 'MSI' },
+    { format: 'exe', label: 'EXE', detail: 'Interactive, scripts and software deployment' },
+    { format: 'msi', label: 'MSI', detail: 'Intune, Ivanti, GPO and managed deployment' },
   ],
   macos: [
-    { format: 'pkg', label: 'PKG' },
-    { format: 'dmg', label: 'DMG' },
-    { format: 'app', label: 'APP' },
+    { format: 'pkg', label: 'PKG', detail: 'Recommended for MDM and managed deployment' },
+    { format: 'dmg', label: 'DMG', detail: 'Interactive macOS distribution' },
+    { format: 'app', label: 'APP', detail: 'Interactive application bundle' },
   ],
   linux: [
-    { format: 'run', label: 'RUN' },
-    { format: 'deb', label: 'DEB' },
-    { format: 'rpm', label: 'RPM' },
+    { format: 'run', label: 'RUN', detail: 'Cross-distribution bootstrap' },
+    { format: 'deb', label: 'DEB', detail: 'Debian, Ubuntu and Mint' },
+    { format: 'rpm', label: 'RPM', detail: 'Fedora, RHEL and compatible distributions' },
   ],
 }
 
 const PLATFORM_META = {
-  windows: {
-    eyebrow: 'Windows x64',
-    description: 'Tenant-bound Windows installers for interactive or software-deployment use.',
-  },
-  macos: {
-    eyebrow: 'macOS',
-    description: 'Tenant-bound native Apple installer formats. The deployment remains valid until revoked.',
-  },
-  linux: {
-    eyebrow: 'Linux x64',
-    description: 'Tenant-bound Linux bootstrap for Debian, Ubuntu, Mint, Fedora and compatible distributions.',
-  },
+  windows: { label: 'Windows', architecture: 'x64' },
+  macos: { label: 'macOS', architecture: 'Universal' },
+  linux: { label: 'Linux', architecture: 'x64' },
 }
 
 function packageState(pkg) {
@@ -48,87 +38,65 @@ function dateText(value) {
   return new Date(value).toLocaleString()
 }
 
-function fileNameFor(packageId, format) {
-  if (format === 'exe') return `Hi5CentralAgent-${packageId}-Windows.exe`
-  if (format === 'msi') return `Hi5CentralAgent-${packageId}-Windows.msi`
-  if (format === 'pkg') return `Hi5CentralAgent-${packageId}-macOS.pkg`
-  if (format === 'dmg') return `Hi5CentralAgent-${packageId}-macOS.dmg`
-  if (format === 'app') return `Hi5CentralAgent-${packageId}-macOS.app.zip`
-  if (format === 'deb') return `hi5central-agent-${packageId}_amd64.deb`
-  if (format === 'rpm') return `hi5central-agent-${packageId}.x86_64.rpm`
-  return `Hi5CentralAgent-${packageId}-Linux.run`
+function selectionLabel(pkg) {
+  if (!pkg?.persistent) return 'One-time token'
+  const platform = PLATFORM_META[pkg.installer_platform]?.label || pkg.installer_platform || 'Agent'
+  return `${platform} ${String(pkg.installer_format || '').toUpperCase()}`.trim()
+}
+
+function installCommand(pkg) {
+  const format = pkg?.installer_format
+  if (format === 'exe') {
+    return '.\\Hi5CentralAgentDeployment-Windows.exe --quiet --config ".\\Hi5CentralDeployment.json"'
+  }
+  if (format === 'msi') {
+    return 'msiexec /i "Hi5CentralAgentDeployment-Windows.msi" /qn HI5DEPLOYMENTCONFIG="%CD%\\Hi5CentralDeployment.json"'
+  }
+  if (format === 'run') {
+    return 'sudo ./Hi5CentralAgentDeployment-Linux.run --config ./Hi5CentralDeployment.json'
+  }
+  if (format === 'deb') {
+    return 'sudo install -d -m 700 /etc/hi5central && sudo install -m 600 ./Hi5CentralDeployment.json /etc/hi5central/deployment.json && sudo dpkg -i ./hi5central-agent-deployment_amd64.deb'
+  }
+  if (format === 'rpm') {
+    return 'sudo install -d -m 700 /etc/hi5central && sudo install -m 600 ./Hi5CentralDeployment.json /etc/hi5central/deployment.json && sudo rpm -U ./hi5central-agent-deployment_x86_64.rpm'
+  }
+  if (format === 'pkg') {
+    return 'Place Hi5CentralDeployment.json at /Library/Application Support/Hi5Central/Deployment.json before installing the PKG.'
+  }
+  if (format === 'dmg' || format === 'app') {
+    return 'Place Hi5CentralDeployment.json beside the app or in Downloads, then open the Hi5Central Agent app.'
+  }
+  return ''
 }
 
 export function RmmAgentDeployment() {
   const [packages, setPackages] = useState([])
   const [issued, setIssued] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [downloading, setDownloading] = useState('')
-  const [artifactStatus, setArtifactStatus] = useState({})
   const [error, setError] = useState('')
   const [copied, setCopied] = useState('')
+  const [selectedPlatform, setSelectedPlatform] = useState('windows')
+  const [selectedFormat, setSelectedFormat] = useState('msi')
 
   async function load() {
     setError('')
     const response = await fetch(`${API_BASE}/api/v1/rmm/agent/enrollment-packages`, { credentials: 'include' })
     const payload = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(payload.error || 'Unable to load Agent deployment settings.')
+    if (!response.ok) throw new Error(payload.error || 'Unable to load Agent installer settings.')
     setPackages(payload.packages || [])
-  }
-
-  async function loadArtifactStatus(packageId) {
-    const response = await fetch(
-      `${API_BASE}/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(packageId)}/artifacts`,
-      { credentials: 'include' },
-    )
-    const payload = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      if (response.status === 410) return
-      throw new Error(payload.error || 'Unable to load installer build status.')
-    }
-    setArtifactStatus((current) => ({ ...current, [packageId]: payload }))
   }
 
   useEffect(() => {
     load().catch((loadError) => setError(loadError.message))
   }, [])
 
-  useEffect(() => {
-    const activeIds = packages
-      .filter((pkg) => pkg.persistent && !pkg.revoked_at)
-      .map((pkg) => pkg.id)
-    if (!activeIds.length) return undefined
+  function changePlatform(platform) {
+    setSelectedPlatform(platform)
+    setSelectedFormat(PLATFORM_FORMATS[platform]?.[0]?.format || '')
+  }
 
-    let stopped = false
-    const refresh = async () => {
-      await Promise.all(activeIds.map(async (packageId) => {
-        try {
-          const response = await fetch(
-            `${API_BASE}/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(packageId)}/artifacts`,
-            { credentials: 'include' },
-          )
-          const payload = await response.json().catch(() => ({}))
-          if (!response.ok || stopped) return
-          setArtifactStatus((current) => ({ ...current, [packageId]: payload }))
-        } catch {
-          // Keep the last known build state; manual Refresh still surfaces API errors.
-        }
-      }))
-    }
-
-    refresh()
-    const timer = window.setInterval(() => {
-      const stillBuilding = activeIds.some((id) => artifactStatus[id]?.status !== 'ready')
-      if (stillBuilding) refresh()
-    }, 5000)
-
-    return () => {
-      stopped = true
-      window.clearInterval(timer)
-    }
-  }, [packages])
-
-  async function createPackage(persistent = true) {
+  async function createInstaller() {
     setBusy(true)
     setError('')
     setCopied('')
@@ -137,35 +105,15 @@ export function RmmAgentDeployment() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(persistent
-          ? {
-              label: 'Hi5Central bulk Agent deployment',
-              persistent: true,
-            }
-          : {
-              label: 'One-time Agent enrollment',
-              persistent: false,
-              ttlMinutes: 60,
-              maxUses: 1,
-            }),
+        body: JSON.stringify({
+          persistent: true,
+          installerPlatform: selectedPlatform,
+          installerFormat: selectedFormat,
+        }),
       })
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || (persistent
-        ? 'Unable to create bulk Agent deployment.'
-        : 'Unable to create one-time enrollment token.'))
+      if (!response.ok) throw new Error(payload.error || 'Unable to create tenant Agent installer.')
       setIssued(payload)
-      if (persistent && payload.package?.id) {
-        setArtifactStatus((current) => ({
-          ...current,
-          [payload.package.id]: {
-            status: 'building',
-            readyCount: (payload.artifacts || []).filter((artifact) => artifact.ready).length,
-            totalCount: (payload.artifacts || []).length,
-            artifacts: payload.artifacts || [],
-            buildError: payload.artifactBuildError || null,
-          },
-        }))
-      }
       await load()
     } catch (createError) {
       setError(createError.message)
@@ -174,28 +122,28 @@ export function RmmAgentDeployment() {
     }
   }
 
-  async function retryArtifactBuild(packageId) {
+  async function createOneTimeToken() {
     setBusy(true)
     setError('')
+    setCopied('')
     try {
-      const response = await fetch(
-        `${API_BASE}/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(packageId)}/build-artifacts`,
-        { method: 'POST', credentials: 'include' },
-      )
+      const response = await fetch(`${API_BASE}/api/v1/rmm/agent/enrollment-packages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'One-time Agent enrollment',
+          persistent: false,
+          ttlMinutes: 60,
+          maxUses: 1,
+        }),
+      })
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || 'Unable to start installer build.')
-      setArtifactStatus((current) => ({
-        ...current,
-        [packageId]: {
-          ...(current[packageId] || {}),
-          status: 'building',
-          buildError: null,
-          artifacts: payload.artifacts || current[packageId]?.artifacts || [],
-        },
-      }))
+      if (!response.ok) throw new Error(payload.error || 'Unable to generate one-time enrollment token.')
+      setIssued(payload)
       await load()
-    } catch (buildError) {
-      setError(buildError.message)
+    } catch (createError) {
+      setError(createError.message)
     } finally {
       setBusy(false)
     }
@@ -210,7 +158,7 @@ export function RmmAgentDeployment() {
         { method: 'POST', credentials: 'include' },
       )
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || 'Unable to revoke Agent deployment.')
+      if (!response.ok) throw new Error(payload.error || 'Unable to revoke Agent installer.')
       if (issued?.package?.id === packageId) setIssued(null)
       await load()
     } catch (revokeError) {
@@ -220,108 +168,48 @@ export function RmmAgentDeployment() {
     }
   }
 
-  async function downloadArtifact(packageId, format) {
-    const key = `${packageId}:${format}`
-    setDownloading(key)
+  function downloadUrl(url, fileName = '') {
+    if (!url) return
+    const anchor = document.createElement('a')
+    anchor.href = url
+    if (fileName) anchor.download = fileName
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  }
+
+  async function downloadDeploymentConfig(pkg) {
     setError('')
     try {
       const response = await fetch(
-        `${API_BASE}/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(packageId)}/artifacts/${encodeURIComponent(format)}`,
+        `${API_BASE}/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(pkg.id)}/deployment-config`,
         { credentials: 'include' },
       )
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
-        if (response.status === 409) {
-          await loadArtifactStatus(packageId).catch(() => {})
-        }
-        throw new Error(payload.error || `Unable to download ${format.toUpperCase()} installer.`)
+        throw new Error(payload.error || 'Unable to download deployment JSON.')
       }
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = fileNameFor(packageId, format)
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
+      downloadUrl(url, 'Hi5CentralDeployment.json')
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (downloadError) {
       setError(downloadError.message)
-    } finally {
-      setDownloading('')
     }
   }
 
-  function commandFor(platform) {
-    if (issued?.installCommands?.[platform]) return issued.installCommands[platform]
-    if (platform === 'windows') return issued?.installCommand || ''
-    return ''
-  }
-
-  async function copyInstallCommand(platform) {
-    const command = commandFor(platform)
-    if (!command) return
+  async function copyText(value, key) {
+    if (!value) return
     try {
-      await navigator.clipboard.writeText(command)
-      setCopied(platform)
-      window.setTimeout(() => setCopied((current) => current === platform ? '' : current), 1800)
+      await navigator.clipboard.writeText(value)
+      setCopied(key)
+      window.setTimeout(() => setCopied((current) => current === key ? '' : current), 1800)
     } catch {
-      setError('Could not copy the install command. Select and copy it manually.')
+      setError('Could not copy to the clipboard.')
     }
   }
 
-  async function copyEnrollmentToken() {
-    const token = issued?.enrollmentToken || ''
-    if (!token) return
-    try {
-      await navigator.clipboard.writeText(token)
-      setCopied('token')
-      window.setTimeout(() => setCopied((current) => current === 'token' ? '' : current), 1800)
-    } catch {
-      setError('Could not copy the enrollment token. Select and copy it manually.')
-    }
-  }
-
-  function artifactButtons(packageId, platform) {
-    const status = artifactStatus[packageId]
-    return (
-      <div className="rmm-agent-artifact-buttons">
-        {PLATFORM_FORMATS[platform].map(({ format, label }) => {
-          const key = `${packageId}:${format}`
-          const artifact = status?.artifacts?.find((item) => item.format === format)
-          const ready = artifact?.ready === true
-          const checking = !status
-          const failed = !ready && Boolean(status?.buildError)
-          const building = !ready && !checking && !failed
-          const buttonText = downloading === key
-            ? 'Downloading…'
-            : checking
-              ? `${label} checking…`
-              : failed
-                ? `${label} unavailable`
-                : building
-                  ? `${label} building…`
-                  : label
-          return (
-            <button
-              className="rmm-primary compact"
-              disabled={Boolean(downloading) || !ready}
-              key={format}
-              onClick={() => downloadArtifact(packageId, format)}
-              title={ready
-                ? `Download ${label}`
-                : failed
-                  ? status.buildError
-                  : `${label} installer is building`}
-              type="button"
-            >
-              <Download size={15} /> {buttonText}
-            </button>
-          )
-        })}
-      </div>
-    )
-  }
+  const selectedFormatMeta = PLATFORM_FORMATS[selectedPlatform]?.find((item) => item.format === selectedFormat)
 
   return (
     <>
@@ -329,48 +217,63 @@ export function RmmAgentDeployment() {
         <div>
           <span className="rmm-eyebrow">Administration</span>
           <h1>Agent deployment</h1>
-          <p>Create revocable bulk installers for managed rollout, or issue a short-lived one-time token for a single device.</p>
+          <p>Choose an operating system and installer type. Hi5Central reuses the same native installer and creates a tenant-specific revocable deployment JSON.</p>
         </div>
-        <div className="rmm-agent-heading-actions">
-          <button className="rmm-secondary compact" disabled={busy} onClick={() => createPackage(false)} type="button">
-            <ShieldCheck size={16} /> {busy ? 'Working…' : 'Generate one-time token'}
-          </button>
-          <button className="rmm-primary compact" disabled={busy} onClick={() => createPackage(true)} type="button">
-            <ShieldCheck size={16} /> {busy ? 'Working…' : 'Create bulk deployment'}
-          </button>
-        </div>
+        <button className="rmm-secondary compact" disabled={busy} onClick={createOneTimeToken} type="button">
+          <ShieldCheck size={16} /> {busy ? 'Working…' : 'Generate one-time token'}
+        </button>
       </div>
 
       {error ? <div className="rmm-agent-error">{error}</div> : null}
 
-      <div className="rmm-agent-deployment-grid">
-        {Object.entries(PLATFORM_META).map(([platform, meta]) => (
-          <section className="rmm-card rmm-agent-download-card" key={platform}>
-            <span className="rmm-eyebrow">{meta.eyebrow}</span>
-            <h2>Hi5Central Agent</h2>
-            <p>{meta.description}</p>
-            {issued?.package?.persistent && issued?.package?.id
-              ? artifactButtons(issued.package.id, platform)
-              : <small>Create a bulk deployment to enable reusable native downloads.</small>}
-          </section>
-        ))}
+      <section className="rmm-card rmm-agent-builder">
+        <div className="rmm-card-heading">
+          <div>
+            <span className="rmm-eyebrow">Tenant installer</span>
+            <h2>Create Agent installer</h2>
+          </div>
+        </div>
 
-        <section className="rmm-card rmm-agent-security-card">
-          <span className="rmm-eyebrow">Enrollment security</span>
-          <h2>Two enrollment modes</h2>
-          <p>Use a revocable bulk deployment for Intune, Ivanti, MDM/RMM and imaging. Use a one-time token for an individual manual enrollment.</p>
-          <div><CheckCircle2 size={15} /> Bulk deployment remains reusable until explicitly revoked</div>
-          <div><CheckCircle2 size={15} /> One-time token expires after 60 minutes and works once</div>
-          <div><CheckCircle2 size={15} /> Every enrolled device receives its own unique device secret</div>
-        </section>
-      </div>
+        <div className="rmm-agent-builder-fields">
+          <label>
+            <span>Operating system</span>
+            <select value={selectedPlatform} onChange={(event) => changePlatform(event.target.value)}>
+              {Object.entries(PLATFORM_META).map(([value, meta]) => (
+                <option key={value} value={value}>{meta.label} · {meta.architecture}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Installer type</span>
+            <select value={selectedFormat} onChange={(event) => setSelectedFormat(event.target.value)}>
+              {PLATFORM_FORMATS[selectedPlatform].map((item) => (
+                <option key={item.format} value={item.format}>{item.label}</option>
+              ))}
+            </select>
+            <small>{selectedFormatMeta?.detail}</small>
+          </label>
+
+          <button className="rmm-primary" disabled={busy || !selectedFormat} onClick={createInstaller} type="button">
+            <Download size={16} /> {busy ? 'Creating…' : 'Create installer'}
+          </button>
+        </div>
+
+        <div className="rmm-agent-shared-installer-note">
+          <CheckCircle2 size={16} />
+          <div>
+            <strong>No tenant-specific binary build</strong>
+            <span>The EXE/MSI/PKG/DMG/APP/RUN/DEB/RPM is shared. Only Hi5CentralDeployment.json is tenant-specific and revocable.</span>
+          </div>
+        </div>
+      </section>
 
       {issued ? (
         <section className="rmm-card rmm-agent-issued-card">
           <div className="rmm-card-heading">
             <div>
               <span className="rmm-eyebrow">Just created</span>
-              <h2>{issued.package?.persistent ? 'Bulk Agent deployment' : 'One-time enrollment token'}</h2>
+              <h2>{issued.package?.persistent ? selectionLabel(issued.package) : 'One-time enrollment token'}</h2>
             </div>
             <button onClick={() => setIssued(null)} type="button"><X size={16} /></button>
           </div>
@@ -378,99 +281,76 @@ export function RmmAgentDeployment() {
           {issued.package?.persistent ? (
             <>
               <p>
-                Deployment <strong>{issued.package?.id}</strong> is active until you revoke it.
-                Download any installer format now or later from the deployment history.
+                This installer can enrol any number of devices for this tenant until you revoke record <strong>{issued.package.id}</strong>.
+                The native installer itself is shared; the JSON contains the revocable tenant credential.
               </p>
-              {artifactStatus[issued.package?.id]?.buildError ? (
-                <div className="rmm-agent-build-state error">
-                  Installer build failed: {artifactStatus[issued.package.id].buildError}
-                  <button disabled={busy} onClick={() => retryArtifactBuild(issued.package.id)} type="button">
-                    Retry build
+              <div className="rmm-agent-issued-actions">
+                <button className="rmm-primary compact" onClick={() => downloadUrl(issued.installer?.url)} type="button">
+                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}
+                </button>
+                <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
+                  <Download size={15} /> Download JSON
+                </button>
+                {installCommand(issued.package) ? (
+                  <button className="rmm-secondary compact" onClick={() => copyText(installCommand(issued.package), 'command')} type="button">
+                    <Copy size={15} /> {copied === 'command' ? 'Copied' : 'Copy deployment command'}
                   </button>
-                </div>
-              ) : artifactStatus[issued.package?.id]?.status !== 'ready' ? (
-                <div className="rmm-agent-build-state">
-                  Building native installers… {artifactStatus[issued.package?.id]?.readyCount || 0}/{artifactStatus[issued.package?.id]?.totalCount || 8} ready
-                </div>
-              ) : (
-                <div className="rmm-agent-build-state ready">All native installers are ready to download.</div>
-              )}
+                ) : null}
+                <button disabled={busy} onClick={() => revokePackage(issued.package.id)} type="button">Revoke</button>
+              </div>
+              <div className="rmm-agent-command">
+                <code>{installCommand(issued.package)}</code>
+              </div>
             </>
           ) : (
             <>
               <p>
                 This token works once and expires at <strong>{dateText(issued.package?.expires_at)}</strong>.
-                Use it for a single manual enrollment; generate another token for another device.
               </p>
-              <div className="rmm-agent-command-group">
-                <strong>Enrollment token</strong>
-                <div className="rmm-agent-command">
-                  <code>{issued.enrollmentToken}</code>
-                  <button onClick={copyEnrollmentToken} type="button">
-                    <Copy size={15} /> {copied === 'token' ? 'Copied' : 'Copy token'}
-                  </button>
-                </div>
+              <div className="rmm-agent-command">
+                <code>{issued.enrollmentToken}</code>
+                <button onClick={() => copyText(issued.enrollmentToken, 'token')} type="button">
+                  <Copy size={15} /> {copied === 'token' ? 'Copied' : 'Copy token'}
+                </button>
               </div>
             </>
           )}
-
-          <div className="rmm-agent-command-list">
-            {Object.keys(PLATFORM_META).map((platform) => {
-              const command = commandFor(platform)
-              if (!command) return null
-              return (
-                <div className="rmm-agent-command-group" key={platform}>
-                  <strong>{PLATFORM_META[platform].eyebrow} command</strong>
-                  <div className="rmm-agent-command">
-                    <code>{command}</code>
-                    <button onClick={() => copyInstallCommand(platform)} type="button">
-                      <Copy size={15} /> {copied === platform ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
         </section>
       ) : null}
 
       <section className="rmm-card rmm-agent-package-list">
         <div className="rmm-card-heading">
-          <div><span className="rmm-eyebrow">Deployments</span><h2>Tenant Agent installer history</h2></div>
+          <div><span className="rmm-eyebrow">Installer records</span><h2>Tenant Agent installers</h2></div>
           <button disabled={busy} onClick={() => load().catch((loadError) => setError(loadError.message))} type="button">
             <RefreshCw size={15} /> Refresh
           </button>
         </div>
 
         <div className="rmm-agent-package-table">
-          <div className="rmm-agent-package-row head"><span>Deployment</span><span>Status</span><span>Enrollments</span><span>Created</span><span /></div>
+          <div className="rmm-agent-package-row head"><span>Installer</span><span>Status</span><span>Enrollments</span><span>Created</span><span /></div>
           {packages.map((pkg) => {
             const state = packageState(pkg)
-            const build = artifactStatus[pkg.id]
-            const buildLabel = !pkg.persistent || pkg.revoked_at
-              ? ''
-              : build?.buildError
-                ? 'Installer build failed'
-                : build?.status === 'ready'
-                  ? 'Installers ready'
-                  : build
-                    ? `Building ${build.readyCount || 0}/${build.totalCount || 8}`
-                    : 'Checking installers…'
             return (
               <div className="rmm-agent-package-row" key={pkg.id}>
-                <span><strong>{pkg.label}</strong><small>{pkg.id}</small></span>
-                <span><strong>{state}</strong>{buildLabel ? <small>{buildLabel}</small> : null}</span>
+                <span>
+                  <strong>{pkg.persistent ? selectionLabel(pkg) : pkg.label}</strong>
+                  <small>{pkg.id}</small>
+                </span>
+                <span><strong>{state}</strong></span>
                 <span>{pkg.use_count}</span>
                 <span>{dateText(pkg.created_at)}</span>
                 <span>
                   {pkg.persistent && !pkg.revoked_at ? (
                     <div className="rmm-agent-package-actions">
-                      {artifactButtons(pkg.id, 'windows')}
-                      {artifactButtons(pkg.id, 'macos')}
-                      {artifactButtons(pkg.id, 'linux')}
-                      {artifactStatus[pkg.id]?.buildError ? (
-                        <button disabled={busy} onClick={() => retryArtifactBuild(pkg.id)} type="button">Retry build</button>
-                      ) : null}
+                      <button className="rmm-secondary compact" onClick={() => downloadUrl(pkg.installer_url)} type="button">
+                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}
+                      </button>
+                      <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(pkg)} type="button">
+                        <Download size={14} /> JSON
+                      </button>
+                      <button className="rmm-secondary compact" onClick={() => copyText(installCommand(pkg), `command:${pkg.id}`)} type="button">
+                        <Copy size={14} /> {copied === `command:${pkg.id}` ? 'Copied' : 'Command'}
+                      </button>
                       <button disabled={busy} onClick={() => revokePackage(pkg.id)} type="button">Revoke</button>
                     </div>
                   ) : state === 'One-time active' ? (
@@ -485,8 +365,8 @@ export function RmmAgentDeployment() {
         {!packages.length ? (
           <div className="rmm-empty compact">
             <Download size={22} />
-            <strong>No Agent deployments yet</strong>
-            <span>Create a tenant deployment to generate reusable native installers.</span>
+            <strong>No Agent installers yet</strong>
+            <span>Select an operating system and installer type above.</span>
           </div>
         ) : null}
       </section>
