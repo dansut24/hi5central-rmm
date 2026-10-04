@@ -1047,6 +1047,44 @@ function handleMobileKeyboardKey(def) {
   sendMobileKeyCombo(def);
 }
 
+function mobileKeyPreviewText(def) {
+  if (!def || def.modifier || def.layer || def.action || def.space) return '';
+  if (def.text != null && String(def.text).length === 1 && String(def.text) !== ' ') {
+    let text = String(def.text);
+    if (mobileKeyboardModifiers.shift) {
+      if (/^[a-z]$/i.test(text)) text = text.toUpperCase();
+      else if (SHIFTED_NUMBER_TEXT[text]) text = SHIFTED_NUMBER_TEXT[text];
+      else if (SHIFTED_PUNCTUATION_TEXT[text]) text = SHIFTED_PUNCTUATION_TEXT[text];
+    }
+    return text;
+  }
+  const key = String(def.key || '');
+  return key.length === 1 ? key : '';
+}
+
+function attachMobileKeyPreview(button, def) {
+  const previewText = mobileKeyPreviewText(def);
+  if (!previewText) return;
+
+  const preview = document.createElement('span');
+  preview.className = 'remote-key-preview';
+  preview.textContent = previewText;
+  button.appendChild(preview);
+
+  const show = () => {
+    const nextText = mobileKeyPreviewText(def);
+    if (!nextText) return;
+    preview.textContent = nextText;
+    button.classList.add('previewing');
+  };
+  const hide = () => button.classList.remove('previewing');
+
+  button.addEventListener('pointerdown', show, { passive: true });
+  button.addEventListener('pointerup', hide, { passive: true });
+  button.addEventListener('pointercancel', hide, { passive: true });
+  button.addEventListener('pointerleave', hide, { passive: true });
+}
+
 function renderMobileKeyboard() {
   if (!elMobileKeyboardRows) return;
   elMobileKeyboardRows.innerHTML = '';
@@ -1065,6 +1103,7 @@ function renderMobileKeyboard() {
         button.dataset.modifier = def.modifier;
         button.classList.toggle('active', !!mobileKeyboardModifiers[def.modifier]);
       }
+      attachMobileKeyPreview(button, def);
       button.addEventListener('click', () => handleMobileKeyboardKey(def));
       row.appendChild(button);
     }
