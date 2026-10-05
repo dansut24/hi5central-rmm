@@ -14,9 +14,9 @@ const PLATFORM_FORMATS = {
     { format: 'app', label: 'APP', detail: 'Interactive application bundle' },
   ],
   linux: [
-    { format: 'run', label: 'RUN', detail: 'Cross-distribution bootstrap' },
-    { format: 'deb', label: 'DEB', detail: 'Debian, Ubuntu and Mint' },
-    { format: 'rpm', label: 'RPM', detail: 'Fedora, RHEL and compatible distributions' },
+    { format: 'deb', label: 'DEB', detail: 'Recommended for Debian, Ubuntu and Mint · single-file installer' },
+    { format: 'rpm', label: 'RPM', detail: 'Recommended for Fedora, RHEL, Rocky and Alma · single-file installer' },
+    { format: 'run', label: 'RUN', detail: 'Legacy cross-distribution bootstrap' },
   ],
 }
 
@@ -47,24 +47,13 @@ function selectionLabel(pkg) {
 
 function linuxInstallCommand(formatValue = '') {
   const format = String(formatValue || '').toLowerCase()
-  const fileName = format === 'run'
-    ? 'Hi5CentralAgentDeployment-Linux.run'
-    : format === 'deb'
-      ? 'hi5central-agent-deployment_amd64.deb'
-      : format === 'rpm'
-        ? 'hi5central-agent-deployment_x86_64.rpm'
-        : ''
-  const bundleName = ['run', 'deb', 'rpm'].includes(format)
-    ? 'Hi5CentralAgentDeployment-Linux-' + format.toUpperCase() + '.tar.gz'
-    : ''
-  const rootCommand = format === 'run'
-    ? 'if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y curl tar; elif command -v dnf >/dev/null 2>&1; then dnf install -y curl tar; elif command -v yum >/dev/null 2>&1; then yum install -y curl tar; else echo "curl and tar are required before installing the Hi5Central Agent."; exit 1; fi; fi && chmod 0755 "$HI5_DIR/Hi5CentralAgentDeployment-Linux.run" && "$HI5_DIR/Hi5CentralAgentDeployment-Linux.run" --config "$HI5_DIR/Hi5CentralDeployment.json"'
-    : format === 'deb'
-      ? 'install -d -m 700 /etc/hi5central && install -m 600 "$HI5_DIR/Hi5CentralDeployment.json" /etc/hi5central/deployment.json && if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get -f install -y || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -f install -y; }; DEBIAN_FRONTEND=noninteractive apt-get install -y "$HI5_DIR/hi5central-agent-deployment_amd64.deb" || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y "$HI5_DIR/hi5central-agent-deployment_amd64.deb"; }; else dpkg -i "$HI5_DIR/hi5central-agent-deployment_amd64.deb"; fi'
-      : format === 'rpm'
-        ? 'install -d -m 700 /etc/hi5central && install -m 600 "$HI5_DIR/Hi5CentralDeployment.json" /etc/hi5central/deployment.json && if command -v dnf >/dev/null 2>&1; then dnf install -y "$HI5_DIR/hi5central-agent-deployment_x86_64.rpm"; elif command -v yum >/dev/null 2>&1; then yum localinstall -y "$HI5_DIR/hi5central-agent-deployment_x86_64.rpm"; else rpm -U "$HI5_DIR/hi5central-agent-deployment_x86_64.rpm"; fi'
-        : ''
-  if (!fileName || !bundleName || !rootCommand) return ''
+  if (format === 'deb') return 'sudo dpkg -i ./hi5centralagent.deb'
+  if (format === 'rpm') return 'sudo rpm -Uvh ./hi5centralagent.rpm'
+  if (format !== 'run') return ''
+
+  const fileName = 'Hi5CentralAgentDeployment-Linux.run'
+  const bundleName = 'Hi5CentralAgentDeployment-Linux-RUN.tar.gz'
+  const rootCommand = 'if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y curl tar; elif command -v dnf >/dev/null 2>&1; then dnf install -y curl tar; elif command -v yum >/dev/null 2>&1; then yum install -y curl tar; else echo "curl and tar are required before installing the Hi5Central Agent."; exit 1; fi; fi && chmod 0755 "$HI5_DIR/Hi5CentralAgentDeployment-Linux.run" && "$HI5_DIR/Hi5CentralAgentDeployment-Linux.run" --config "$HI5_DIR/Hi5CentralDeployment.json"'
   return '(' + [
     'HI5_DIR="$PWD"',
     'HI5_EXTRACT=""',
@@ -73,7 +62,7 @@ function linuxInstallCommand(formatValue = '') {
     'if { [ ! -f "$HI5_DIR/Hi5CentralDeployment.json" ] || [ ! -f "$HI5_DIR/' + fileName + '" ]; } && [ -f "$HI5_BUNDLE" ]; then command -v tar >/dev/null 2>&1 || { echo "tar is required to unpack the Hi5Central deployment bundle."; exit 1; }; HI5_EXTRACT="$(mktemp -d /tmp/hi5central-deploy.XXXXXX)" || exit 1; tar -xzf "$HI5_BUNDLE" -C "$HI5_EXTRACT" || { rm -rf "$HI5_EXTRACT"; exit 1; }; HI5_DIR="$HI5_EXTRACT"; fi',
     '[ -f "$HI5_DIR/Hi5CentralDeployment.json" ] && [ -f "$HI5_DIR/' + fileName + '" ] || { echo "Hi5Central deployment bundle or installer files were not found in the current folder or Downloads."; [ -n "$HI5_EXTRACT" ] && rm -rf "$HI5_EXTRACT"; exit 1; }',
     'HI5_INSTALL=' + JSON.stringify(rootCommand),
-    'if [ "$(id -u)" -eq 0 ]; then HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; elif command -v sudo >/dev/null 2>&1 && id -nG | tr " " "\\n" | grep -Eq "^(sudo|wheel)$"; then sudo /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; elif command -v pkexec >/dev/null 2>&1; then pkexec /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; else echo "Administrator privileges are required. Enter the root password when prompted."; su -c "HI5_DIR=\\\"$HI5_DIR\\\" /bin/sh -c \'$HI5_INSTALL\'"; HI5_STATUS=$?; fi',
+    'if [ "$(id -u)" -eq 0 ]; then HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; elif command -v sudo >/dev/null 2>&1 && id -nG | tr " " "\n" | grep -Eq "^(sudo|wheel)$"; then sudo /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; elif command -v pkexec >/dev/null 2>&1; then pkexec /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; else echo "Administrator privileges are required. Enter the root password when prompted."; su -c "HI5_DIR=\"$HI5_DIR\" /bin/sh -c \'$HI5_INSTALL\'"; HI5_STATUS=$?; fi',
     '[ -n "$HI5_EXTRACT" ] && rm -rf "$HI5_EXTRACT"',
     'exit "$HI5_STATUS"',
   ].join('; ') + ')'
@@ -246,7 +235,7 @@ export function RmmAgentDeployment() {
         <div>
           <span className="rmm-eyebrow">Administration</span>
           <h1>Agent deployment</h1>
-          <p>Choose an operating system and installer type. Windows EXE and MSI are tenant-aware, revocable and can be deployed without a JSON sidecar.</p>
+          <p>Choose an operating system and installer type. Windows EXE/MSI and Linux DEB/RPM are tenant-aware, revocable single-file installers with no JSON sidecar.</p>
         </div>
         <button className="rmm-secondary compact" disabled={busy} onClick={createOneTimeToken} type="button">
           <ShieldCheck size={16} /> {busy ? 'Working…' : 'Generate one-time token'}
@@ -291,8 +280,8 @@ export function RmmAgentDeployment() {
         <div className="rmm-agent-shared-installer-note">
           <CheckCircle2 size={16} />
           <div>
-            <strong>Tenant-stamped Windows EXE &amp; MSI</strong>
-            <span>The VPS stamps the revocable tenant deployment credential into the selected Windows installer instantly. No JSON file, .NET runtime or per-tenant GitHub build is required.</span>
+            <strong>VPS-generated tenant installers</strong>
+            <span>Windows EXE/MSI and Linux DEB/RPM are generated instantly from shared release payloads. The revocable deployment credential is embedded in the selected installer, with no sidecar JSON and no per-tenant GitHub build.</span>
           </div>
         </div>
       </section>
@@ -311,15 +300,15 @@ export function RmmAgentDeployment() {
             <>
               <p>
                 This installer can enrol any number of devices for this tenant until you revoke record <strong>{issued.package.id}</strong>.
-                {issued.package.installer_format === 'exe'
-                  ? ' The downloaded Hi5CentralAgent.exe already contains its revocable tenant credential and can be copied to an offline device.'
-                  : ' This installer currently uses the deployment configuration shown below.'}
+                {['exe', 'msi', 'deb', 'rpm'].includes(issued.package.installer_format)
+                  ? ' The downloaded installer already contains its revocable tenant credential and can be copied to an offline device.'
+                  : ' This legacy installer uses the deployment configuration shown below.'}
               </p>
               <div className="rmm-agent-issued-actions">
                 <button className="rmm-primary compact" onClick={() => downloadInstallerBundle(issued.package, issued.installer?.url)} type="button">
-                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}{issued.package.installer_platform === 'linux' ? ' bundle' : (!['exe', 'msi'].includes(issued.package.installer_format) ? ' + config' : '')}
+                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}{!['exe', 'msi', 'deb', 'rpm'].includes(issued.package.installer_format) ? (issued.package.installer_platform === 'linux' ? ' bundle' : ' + config') : ''}
                 </button>
-                {!['exe', 'msi'].includes(issued.package.installer_format) ? (
+                {!['exe', 'msi', 'deb', 'rpm'].includes(issued.package.installer_format) ? (
                   <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
                     <Download size={15} /> Config only
                   </button>
@@ -376,9 +365,9 @@ export function RmmAgentDeployment() {
                   {pkg.persistent && !pkg.revoked_at ? (
                     <div className="rmm-agent-package-actions">
                       <button className="rmm-secondary compact" onClick={() => downloadInstallerBundle(pkg, pkg.installer_url)} type="button">
-                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}{pkg.installer_platform === 'linux' ? ' bundle' : (!['exe', 'msi'].includes(pkg.installer_format) ? ' + config' : '')}
+                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}{!['exe', 'msi', 'deb', 'rpm'].includes(pkg.installer_format) ? (pkg.installer_platform === 'linux' ? ' bundle' : ' + config') : ''}
                       </button>
-                      {!['exe', 'msi'].includes(pkg.installer_format) ? (
+                      {!['exe', 'msi', 'deb', 'rpm'].includes(pkg.installer_format) ? (
                         <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(pkg)} type="button">
                           <Download size={14} /> Config only
                         </button>
