@@ -70,7 +70,7 @@ import { RmmAgentDeployment } from './RmmAgentDeployment.jsx'
 import { RmmAutomation, RmmDeviceAutomationPanel } from './RmmAutomationWorkspace.jsx'
 import { RmmConnect } from './RmmConnect.jsx'
 import { DeviceActivityTimeline, DeviceJobsPanel, RmmAuditActivity, prefetchDeviceHistory } from './RmmActivityViews.jsx'
-import { detectRemoteViewerClient } from './remoteViewerClient.js'
+import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerDownloadUrl, remoteViewerPlatformLabel, viewerVersionNeedsUpdate } from './remoteViewerClient.js'
 import { RmmDeviceToolWorkspace } from './RmmDeviceTools.jsx'
 import './RmmPlatformApp.css'
 
@@ -113,6 +113,18 @@ const pageMeta = {
 
 function deviceIsOnline(device) {
   return Boolean(device?.agentDeviceId) && String(device?.status || '').toLowerCase() === 'online'
+}
+
+function agentVersionAtLeast(value, minimum) {
+  const current = String(value || '').match(/\d+(?:\.\d+){1,3}/)?.[0]?.split('.').map(Number) || []
+  const target = String(minimum || '').match(/\d+(?:\.\d+){1,3}/)?.[0]?.split('.').map(Number) || []
+  const length = Math.max(current.length, target.length)
+  for (let index = 0; index < length; index += 1) {
+    const left = current[index] || 0
+    const right = target[index] || 0
+    if (left !== right) return left > right
+  }
+  return target.length > 0
 }
 
 function healthClass(value = '') {
@@ -194,8 +206,9 @@ function RmmPageSkeleton() {
 
 function RmmTopbar({ activeView, currentUser, navigate, onLogout, onMenu, query, setQuery, setTheme, theme }) {
   const [, title] = pageMeta[activeView] || pageMeta.dashboard
+  const platform = deploymentConfig()
   const initials = String(currentUser?.name || 'HC').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'HC'
-  return <header className="rmm-topbar"><div className="rmm-topbar-title"><button className="rmm-menu-button" onClick={onMenu} type="button"><Menu size={19} /></button><div><span>RMM</span><strong>{title}</strong></div></div><label className="rmm-global-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search devices, users, sites, groups, alerts…" /></label><div className="rmm-topbar-actions"><button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} type="button">{theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}</button><button className="rmm-notification-button" onClick={() => navigate('alerts')} type="button"><Bell size={17} /><b>{rmmAlerts.filter((alert) => alert.status === 'Open').length}</b></button><button className="rmm-user" onClick={onLogout} type="button"><span>{initials}</span><div><strong>{currentUser?.name || 'Hi5Central user'}</strong><small>Sign out</small></div><LogOut size={14} /></button></div></header>
+  return <header className="rmm-topbar"><div className="rmm-topbar-title"><button className="rmm-menu-button" onClick={onMenu} type="button"><Menu size={19} /></button><div><span>RMM {platform.runtimeEnvironment !== 'live' ? <b className={`hi5-env-badge hi5-env-${platform.runtimeEnvironment}`}>{platform.runtimeEnvironment.toUpperCase()}{platform.featureMode === 'all_enabled' ? ' · ALL FEATURES' : ''}</b> : null}</span><strong>{title}</strong></div></div><label className="rmm-global-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search devices, users, sites, groups, alerts…" /></label><div className="rmm-topbar-actions"><button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} type="button">{theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}</button><button className="rmm-notification-button" onClick={() => navigate('alerts')} type="button"><Bell size={17} /><b>{rmmAlerts.filter((alert) => alert.status === 'Open').length}</b></button><button className="rmm-user" onClick={onLogout} type="button"><span>{initials}</span><div><strong>{currentUser?.name || 'Hi5Central user'}</strong><small>Sign out</small></div><LogOut size={14} /></button></div></header>
 }
 
 function PageHeading({ activeView, action }) {
@@ -249,7 +262,9 @@ function RmmDashboard({ canAudit = false, devices = [], navigate, openDevice }) 
   const compliance = patchReported.length ? Math.round(patchReported.reduce((sum, device) => sum + Number(device.patchCompliance), 0) / patchReported.length) : null
   const pendingPatches = devices.reduce((sum, device) => sum + (Number.isFinite(Number(device.pendingPatches)) ? Number(device.pendingPatches) : 0), 0)
   const healthPercent = devices.length ? Math.round((healthy / devices.length) * 100) : null
-  const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const runtimeConfig = deploymentConfig()
+  const apiBase = window.__HI5_API_BASE__ || runtimeConfig.apiUrl
+  const viewerDownloadsUrl = runtimeConfig.downloadsUrl
   const [recentJobs, setRecentJobs] = useState([])
   const [recentActivity, setRecentActivity] = useState([])
   const [operationsLoading, setOperationsLoading] = useState(true)
@@ -402,7 +417,9 @@ function networkLinePoints(samples, key) {
 }
 
 function AgentMaintenance({ device }) {
-  const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const runtimeConfig = deploymentConfig()
+  const apiBase = window.__HI5_API_BASE__ || runtimeConfig.apiUrl
+  const viewerDownloadsUrl = runtimeConfig.downloadsUrl
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(Boolean(device.agentDeviceId))
   const [busy, setBusy] = useState(false)
@@ -437,6 +454,7 @@ function AgentMaintenance({ device }) {
   const releases = info?.releases || []
   const target = releases.find((release) => !release.installed) || releases[0]
   const latest = info?.latestUpgrade
+  const unixAgent = ['Linux', 'macOS'].includes(info?.device?.platform)
   const latestTargetsTarget = Boolean(target?.id && latest?.request_metadata?.release_id === target.id)
   const verified = Boolean(target?.installed)
   const running = latestTargetsTarget && ['queued', 'claimed'].includes(latest?.status)
@@ -475,17 +493,17 @@ function AgentMaintenance({ device }) {
     {loading ? <p>Loading Agent release state…</p> : <>
       <div className="rmm-agent-maintenance-meta">
         <span><small>Agent reports</small><strong>{info?.device?.agentVersion || 'Not reported'}</strong></span>
-        <span><small>PatchHost</small><strong>{info?.device?.patchHostVersion || 'Not reported'}</strong></span>
-        <span><small>Target</small><strong>{target ? target.version + ' / ' + (target.patchHostVersion || '—') : 'No release'}</strong></span>
+        <span><small>{unixAgent ? 'Platform' : 'PatchHost'}</small><strong>{unixAgent ? (info?.device?.platform || 'Unix') : (info?.device?.patchHostVersion || 'Not reported')}</strong></span>
+        <span><small>Target</small><strong>{target ? (unixAgent ? target.version : target.version + ' / ' + (target.patchHostVersion || '—')) : 'No release'}</strong></span>
       </div>
       {target?.releaseNotes && <p>{target.releaseNotes}</p>}
-      {scheduled && <div className="rmm-agent-maintenance-state running"><Clock3 size={14} /><span>Installer scheduled. Waiting for the Agent to restart and report PatchHost {target.patchHostVersion}.</span></div>}
-      {staleScheduled && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>The scheduled upgrade did not report the target Agent/PatchHost within 3 minutes. The device is still online, so you can retry the upgrade.</span></div>}
-      {verified && <div className="rmm-agent-maintenance-state healthy"><CheckCircle2 size={14} /><span>PatchHost {info?.device?.patchHostVersion} is reporting. This release is verified on the endpoint.</span></div>}
+      {scheduled && <div className="rmm-agent-maintenance-state running"><Clock3 size={14} /><span>{unixAgent ? 'Upgrade staged. Waiting for the Agent to restart and report ' + target.version + '.' : 'Installer scheduled. Waiting for the Agent to restart and report PatchHost ' + target.patchHostVersion + '.'}</span></div>}
+      {staleScheduled && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>{unixAgent ? 'The upgrade did not reconnect on the target Agent version within 3 minutes. The endpoint can be retried safely.' : 'The scheduled upgrade did not report the target Agent/PatchHost within 3 minutes. The device is still online, so you can retry the upgrade.'}</span></div>}
+      {verified && <div className="rmm-agent-maintenance-state healthy"><CheckCircle2 size={14} /><span>{unixAgent ? 'Agent ' + info?.device?.agentVersion + ' is reporting and this release is verified on the endpoint.' : 'PatchHost ' + info?.device?.patchHostVersion + ' is reporting. This release is verified on the endpoint.'}</span></div>}
       {failed && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>{latest?.error_message || 'The Agent upgrade preparation job failed.'}</span></div>}
       {error && <div className="rmm-agent-maintenance-state critical"><AlertTriangle size={14} /><span>{error}</span></div>}
       {!verified && <button className="rmm-primary compact" disabled={busy || running || scheduled || !target || !info?.device?.online} onClick={upgrade} type="button"><Download size={14} /> {busy ? 'Starting…' : running ? 'Preparing…' : scheduled ? 'Waiting for restart…' : !info?.device?.online ? 'Device offline' : target ? 'Upgrade to ' + target.version : 'No release available'}</button>}
-      {target?.sha256 && <small className="rmm-agent-maintenance-sha">SHA-256 {target.sha256.slice(0, 12)}…{target.sha256.slice(-12)} · {target.channel}</small>}
+      {target?.sha256 && <small className="rmm-agent-maintenance-sha">SHA-256 {target.sha256.slice(0, 12)}…{target.sha256.slice(-12)} · {target.channel}{unixAgent ? ' · rollback protected' : ''}</small>}
     </>}
   </section>
 }
@@ -1004,10 +1022,13 @@ function DeviceSoftware({ device }) {
   const deviceOnline = deviceIsOnline(device)
   const [search, setSearch] = useState('')
   const [busyKey, setBusyKey] = useState('')
+  const [busyMode, setBusyMode] = useState('')
   const [removedKeys, setRemovedKeys] = useState([])
   const [resultByKey, setResultByKey] = useState({})
   const [visibleLimit, setVisibleLimit] = useState(120)
   const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const platform = String(device.platform || device.operatingSystem || device.operating_system || '').toLowerCase()
+  const unixDevice = platform.includes('linux') || platform.includes('mac')
 
   function softwareKey(app) {
     return `${app.scope || 'unknown'}:${app.registryKey || app.name}:${app.version || ''}`
@@ -1030,6 +1051,8 @@ function DeviceSoftware({ device }) {
     if (reason === 'protected_security_or_agent') return result?.detail || 'Protected Agent or security software cannot be removed here.'
     if (reason === 'password_or_vendor_protection_required') return 'The vendor requires a password, tamper-protection change or another authorised removal method.'
     if (reason === 'no_safe_silent_uninstaller_found') return 'No safe silent uninstall method was found for this application.'
+    if (reason === 'protected_system_component') return result?.detail || 'This item is classified as an operating-system component and cannot be removed here.'
+    if (reason === 'unsafe_dependency_removal') return result?.detail || 'The package manager reported that removing this application would also remove other packages, so Hi5Central blocked it.'
     if (reason === 'user_context_or_silent_uninstall_failed') return 'The application is installed for a user profile and could not be removed silently from the available user/system context.'
     if (reason === 'silent_uninstall_failed') return 'Silent uninstall methods were attempted but the application is still installed.'
     return result?.error || 'The uninstall could not be completed.'
@@ -1051,7 +1074,8 @@ function DeviceSoftware({ device }) {
     const key = softwareKey(app)
     if (!window.confirm(`Uninstall ${app.name} silently from ${device.name}? Hi5Central will try the vendor command first, verify removal, then try recognised silent fallbacks if needed.`)) return
     setBusyKey(key)
-    setResultByKey((current) => ({ ...current, [key]: { tone: 'running', message: 'Preparing silent uninstall…' } }))
+    setBusyMode('uninstall')
+    setResultByKey((current) => ({ ...current, [key]: { tone: 'running', message: unixDevice ? 'Preparing native uninstall…' : 'Preparing silent uninstall…' } }))
     try {
       const response = await fetch(`${apiBase}/api/v1/rmm/devices/${encodeURIComponent(device.agentDeviceId)}/actions`, {
         method: 'POST',
@@ -1059,7 +1083,14 @@ function DeviceSoftware({ device }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'software.uninstall',
-          payload: { name: app.name, registry_key: app.registryKey, scope: app.scope, user_profile: app.userProfile },
+          payload: {
+            name: app.name,
+            registry_key: app.registryKey,
+            scope: app.scope,
+            user_profile: app.userProfile,
+            package_manager: app.packageManager,
+            package_id: app.packageId,
+          },
         }),
       })
       const payload = await response.json().catch(() => ({}))
@@ -1074,11 +1105,70 @@ function DeviceSoftware({ device }) {
       setResultByKey((current) => ({ ...current, [key]: { tone: 'critical', message: error?.message || 'Uninstall failed.' } }))
     } finally {
       setBusyKey('')
+      setBusyMode('')
+    }
+  }
+
+  function updateMessage(result) {
+    if (result?.status === 'updated') return 'Updated successfully'
+    if (result?.reason === 'native_update_failed') return result?.error || 'Native package update failed.'
+    return result?.error || result?.detail || 'The update could not be completed.'
+  }
+
+  async function updateSoftware(app) {
+    if (!deviceOnline || !device.agentDeviceId || busyKey || !app.nativeActionable || !app.updateAvailable) return
+    const key = softwareKey(app)
+    const target = app.latestVersion ? ` to ${app.latestVersion}` : ''
+    if (!window.confirm(`Update ${app.name}${target} on ${device.name} using ${app.packageManager || 'its native package manager'}?`)) return
+
+    setBusyKey(key)
+    setBusyMode('update')
+    setResultByKey((current) => ({ ...current, [key]: { tone: 'running', message: 'Native package update running…' } }))
+
+    try {
+      const response = await fetch(`${apiBase}/api/v1/rmm/devices/${encodeURIComponent(device.agentDeviceId)}/actions`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'software.update',
+          payload: {
+            name: app.name,
+            registry_key: app.registryKey,
+            scope: app.scope,
+            package_manager: app.packageManager,
+            package_id: app.packageId,
+            latest_version: app.latestVersion,
+          },
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to queue the software update.')
+      const job = await waitForAction(payload.job?.id)
+      const result = job?.result || {}
+      const success = job?.status === 'completed' && result?.status === 'updated'
+      setResultByKey((current) => ({
+        ...current,
+        [key]: { tone: success ? 'healthy' : 'critical', message: updateMessage(result), result },
+      }))
+    } catch (error) {
+      setResultByKey((current) => ({
+        ...current,
+        [key]: { tone: 'critical', message: error?.message || 'Update failed.' },
+      }))
+    } finally {
+      setBusyKey('')
+      setBusyMode('')
     }
   }
 
   const normalized = search.trim().toLowerCase()
-  const visibleSoftware = (device.installedSoftware || []).filter((app) => {
+  const applicationSoftware = (device.installedSoftware || []).filter((app) => app.displayInInstalledSoftware !== false)
+  const hiddenSystemComponents = Math.max(
+    Number(device.hiddenSoftwareComponents || 0),
+    (device.installedSoftware || []).length - applicationSoftware.length,
+  )
+  const visibleSoftware = applicationSoftware.filter((app) => {
     const key = softwareKey(app)
     if (removedKeys.includes(key)) return false
     return !normalized || [app.name, app.version, app.publisher, app.installLocation].join(' ').toLowerCase().includes(normalized)
@@ -1088,11 +1178,11 @@ function DeviceSoftware({ device }) {
   return (
     <section className="rmm-table-card rmm-device-software-card">
       <div className="rmm-device-section-heading">
-        <div><span className="rmm-eyebrow">Inventory</span><h2>Installed software</h2><p>{visibleSoftware.length} applications are reported by the latest real device inventory.</p></div>
+        <div><span className="rmm-eyebrow">Inventory</span><h2>Installed software</h2><p>{visibleSoftware.length} applications are reported by the latest device inventory{hiddenSystemComponents > 0 ? ` · ${hiddenSystemComponents} OS components hidden` : ''}.</p></div>
         <label className="rmm-device-inline-search"><Search size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(120) }} placeholder="Search installed software…" /></label>
       </div>
       <div className="rmm-table rmm-device-software-table">
-        <div className="rmm-table-head"><span>Application</span><span>Version</span><span>Publisher</span><span>Installed</span><span>Scope / size</span><span>Removal</span></div>
+        <div className="rmm-table-head"><span>Application</span><span>Version</span><span>Publisher</span><span>Installed</span><span>Scope / size</span><span>Actions</span></div>
         {renderedSoftware.map((app) => {
           const key = softwareKey(app)
           const protectedApp = protectedSoftware(app)
@@ -1103,7 +1193,18 @@ function DeviceSoftware({ device }) {
             <span><strong>{app.publisher || 'Not reported'}</strong></span>
             <span><strong>{app.installed || 'Not reported'}</strong></span>
             <span><strong>{softwareScopeLabel(app.scope)}</strong><small>{app.estimatedSizeKb == null ? 'Size not reported' : formatBytes(Number(app.estimatedSizeKb) * 1024)}</small></span>
-            <span>{protectedApp ? <StatusPill tone="neutral">Protected</StatusPill> : !device.agentDeviceId ? <StatusPill tone="neutral">Agent required</StatusPill> : !deviceOnline ? <button className="rmm-software-uninstall" disabled title="Device is offline" type="button"><WifiOff size={13} /> Offline</button> : <button className="rmm-software-uninstall" disabled={busyKey === key} onClick={() => uninstallSoftware(app)} type="button"><Trash2 size={13} /> {busyKey === key ? 'Uninstalling…' : 'Uninstall'}</button>}</span>
+            <span className="rmm-software-actions">{protectedApp
+              ? <StatusPill tone="neutral">Protected</StatusPill>
+              : !device.agentDeviceId
+                ? <StatusPill tone="neutral">Agent required</StatusPill>
+                : unixDevice && app.nativeActionable !== true
+                  ? <StatusPill tone="neutral">Inventory only</StatusPill>
+                  : !deviceOnline
+                    ? <button className="rmm-software-uninstall" disabled title="Device is offline" type="button"><WifiOff size={13} /> Offline</button>
+                    : <>
+                        {unixDevice && app.nativeActionable === true && app.updateAvailable === true && <button className="rmm-software-uninstall" disabled={busyKey === key} onClick={() => updateSoftware(app)} type="button"><RefreshCw size={13} /> {busyKey === key && busyMode === 'update' ? 'Updating…' : 'Update'}</button>}
+                        <button className="rmm-software-uninstall" disabled={busyKey === key} onClick={() => uninstallSoftware(app)} type="button"><Trash2 size={13} /> {busyKey === key && busyMode === 'uninstall' ? 'Uninstalling…' : 'Uninstall'}</button>
+                      </>}</span>
           </div>
         })}
       </div>
@@ -1655,6 +1756,41 @@ function DeviceItsm({ relatedTickets, onCreateIncident }) {
   )
 }
 
+function ViewerInstallPrompt({ prompt, onClose, onRetry }) {
+  if (!prompt) return null
+  const platformLabel = remoteViewerPlatformLabel(prompt.platform)
+  const runtimeConfig = deploymentConfig()
+  const downloadUrl =
+    prompt.downloadUrl || remoteViewerDownloadUrl(prompt.platform, runtimeConfig.downloadsUrl)
+  const hasDownload = Boolean(downloadUrl)
+  const isUpdate = prompt.kind === 'update'
+  const isSetup = prompt.kind === 'setup'
+  const versionText = prompt.installedVersion
+    ? `Installed ${prompt.installedVersion} · current ${prompt.requiredVersion || 'newer version'}`
+    : prompt.requiredVersion
+      ? `A newer Viewer (${prompt.requiredVersion}) is required.`
+      : 'A newer Viewer is required.'
+  return <div className="rmm-viewer-install-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.() }}>
+    <section aria-labelledby="rmm-viewer-install-title" aria-modal="true" className="rmm-viewer-install-dialog" role="dialog">
+      <button aria-label="Close" className="rmm-viewer-install-close" onClick={onClose} type="button"><X size={18} /></button>
+      <span className="rmm-viewer-install-icon"><Monitor size={24} /></span>
+      <span className="rmm-eyebrow">Remote desktop</span>
+      <h2 id="rmm-viewer-install-title">{isUpdate ? 'Update Hi5Central Viewer' : isSetup ? 'Hi5Central Viewer required' : 'Hi5Central Viewer wasn’t detected'}</h2>
+      <p>{isUpdate ? `${versionText} Update the Viewer on ${platformLabel}, then reopen this same remote session.` : isSetup ? `Remote desktop on ${platformLabel} uses the native Hi5Central Viewer. Install it if needed, or open it now if it is already installed.` : `Remote desktop on ${platformLabel} opens in the Hi5Central Viewer. Install it once, then return here and open this session again.`}</p>
+      <div className="rmm-viewer-install-steps">
+        <span><b>1</b><span><strong>{isUpdate ? 'Update Hi5Central Viewer' : 'Install Hi5Central Viewer'}</strong><small>{platformLabel === 'macOS' ? 'Open the DMG, replace Hi5Central Viewer in Applications, then open it once.' : platformLabel === 'Linux' ? 'Install the DEB package; APT will upgrade the existing Viewer automatically.' : 'Run the Hi5Central Viewer installer.'}</small></span></span>
+        <span><b>2</b><span><strong>Open this session again</strong><small>The existing secure remote-session link will be reused; another session does not need to be created.</small></span></span>
+      </div>
+      <div className="rmm-viewer-install-actions">
+        {hasDownload ? <a className="rmm-primary compact" href={downloadUrl} target="_blank" rel="noreferrer"><Download size={16} /> {isUpdate ? 'Download update' : 'Download'} for {platformLabel}</a> : null}
+        <button onClick={onRetry} type="button"><ExternalLink size={16} /> {isUpdate ? 'I’ve updated it — open Viewer' : isSetup ? 'I already have it — open Viewer' : 'I’ve installed it — open Viewer'}</button>
+      </div>
+      {!hasDownload ? <small className="rmm-viewer-install-warning">A Viewer download has not been published for this desktop platform yet. You can retry if it is already installed.</small> : null}
+      <small className="rmm-viewer-install-note">{isUpdate ? 'Hi5Central checks the version reported by the native Viewer after it launches.' : isSetup ? 'Safari cannot safely check whether a custom desktop protocol is installed without trying to open it, so Hi5Central confirms setup first on this Mac.' : 'Your browser cannot directly confirm whether a custom desktop protocol is installed, so Hi5Central shows this prompt only when the Viewer launch does not take focus.'}</small>
+    </section>
+  </div>
+}
+
 function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device, initialSection = 'overview', initialTool = '', onBack, onDeviceRoute, navigate, onCreateIncident, tickets = [] }) {
   const [section, setSection] = useState(initialSection || 'overview')
   const hasLiveAgent = Boolean(device.agentDeviceId)
@@ -1664,6 +1800,15 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   const subnavRef = useRef(null)
   const [remoteState, setRemoteState] = useState('')
   const [remoteBusy, setRemoteBusy] = useState(false)
+  const [remoteBusyMode, setRemoteBusyMode] = useState('')
+  const [waylandPersistence, setWaylandPersistence] = useState(false)
+  const [waylandPersistenceStatus, setWaylandPersistenceStatus] = useState({
+    state: 'checking',
+    remembered: null,
+    activeUser: null,
+  })
+  const [forgetWaylandBusy, setForgetWaylandBusy] = useState(false)
+  const [viewerInstallPrompt, setViewerInstallPrompt] = useState(null)
   const [powerBusy, setPowerBusy] = useState(false)
   const [automationOpen, setAutomationOpen] = useState(false)
   const [monitoringResolution, setMonitoringResolution] = useState(null)
@@ -1679,6 +1824,23 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     || (device.user && ticket.requester === device.user)
   ))
   const apiBase = window.__HI5_API_BASE__ || deploymentConfig().apiUrl
+  const devicePlatformText = [
+    device.platform,
+    device.os,
+    device.operatingSystem,
+    device.operating_system,
+  ].filter(Boolean).join(' ').toLowerCase()
+  const isLinuxDevice = /linux|fedora|ubuntu|debian|rhel|centos|rocky|alma|opensuse|suse/.test(devicePlatformText)
+  const remoteDesktop = device.inventory?.remote_desktop || device.inventory?.agent?.capabilities?.remote_desktop_capabilities || {}
+  const remoteBackend = String(remoteDesktop.backend || '').toLowerCase()
+  const remoteSessionType = String(remoteDesktop.session_type || '').toLowerCase()
+  const isWaylandDevice = isLinuxDevice && (
+    remoteBackend.includes('wayland')
+    || remoteSessionType.includes('wayland')
+    || remoteDesktop.wayland?.detected === true
+  )
+  const waylandPersistenceSupported = isWaylandDevice && agentVersionAtLeast(device.agent, '0.3.151')
+  const waylandPersistenceStatusSupported = isWaylandDevice && agentVersionAtLeast(device.agent, '0.3.153')
 
   useEffect(() => {
     prefetchDeviceHistory(device).catch(() => {})
@@ -1687,7 +1849,56 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   useEffect(() => {
     setSection(initialSection || 'overview')
     setTool(initialSection === 'tools' ? (initialTool || '') : '')
+    setWaylandPersistence(false)
   }, [device.id, initialSection, initialTool])
+
+  useEffect(() => {
+    if (!isWaylandDevice) {
+      setWaylandPersistence(false)
+      setWaylandPersistenceStatus({ state: 'unsupported', remembered: null, activeUser: null })
+      return undefined
+    }
+    if (!waylandPersistenceStatusSupported) {
+      setWaylandPersistenceStatus({ state: 'upgrade_required', remembered: null, activeUser: null })
+      return undefined
+    }
+    if (!device.agentDeviceId || !deviceOnline) {
+      setWaylandPersistenceStatus({ state: 'offline', remembered: null, activeUser: null })
+      return undefined
+    }
+
+    let active = true
+    const refresh = async () => {
+      setWaylandPersistenceStatus((current) => ({
+        ...current,
+        state: current.remembered == null ? 'checking' : current.state,
+      }))
+      try {
+        const response = await fetch(
+          apiBase + '/api/v1/rmm/devices/' + encodeURIComponent(device.agentDeviceId) + '/wayland-persistence',
+          { credentials: 'include', cache: 'no-store' },
+        )
+        const payload = await response.json().catch(() => ({}))
+        if (!active) return
+        if (!response.ok) throw new Error(payload.error || 'Unable to read remembered Wayland access.')
+        setWaylandPersistenceStatus({
+          state: payload.state || (payload.remembered === true ? 'remembered' : 'not_remembered'),
+          remembered: payload.remembered === true ? true : payload.remembered === false ? false : null,
+          activeUser: payload.activeUser || null,
+        })
+      } catch {
+        if (active) setWaylandPersistenceStatus({ state: 'unknown', remembered: null, activeUser: null })
+      }
+    }
+
+    refresh()
+    const onFocus = () => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      active = false
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [apiBase, device.agent, device.agentDeviceId, device.id, deviceOnline, isWaylandDevice, waylandPersistenceStatusSupported])
 
   useEffect(() => {
     const nav = subnavRef.current
@@ -1748,6 +1959,129 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
     onCreateIncident?.({ device, alert })
   }
 
+  function viewerVerifiedStorageKey(platform) {
+    return 'hi5central.native-viewer.verified.' + String(platform || 'unknown')
+  }
+
+  function nativeViewerPreviouslyVerified(platform) {
+    try {
+      return window.localStorage.getItem(viewerVerifiedStorageKey(platform)) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  function rememberNativeViewerVerified(platform) {
+    try {
+      window.localStorage.setItem(viewerVerifiedStorageKey(platform), '1')
+    } catch {}
+  }
+
+    async function verifyNativeViewerVersion({ sessionId, nativeUrl, viewerDownloadUrl, viewerPlatform, requiredVersion }) {
+    if (!sessionId || !requiredVersion) return
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 350))
+      try {
+        const response = await fetch(apiBase + '/api/v1/rmm/remote-sessions/' + encodeURIComponent(sessionId), {
+          credentials: 'include',
+          cache: 'no-store',
+        })
+        if (!response.ok) continue
+        const payload = await response.json().catch(() => ({}))
+        const session = payload.session || {}
+        const connected = Boolean(session.viewer_connected_at || session.viewerConnectedAt || ['viewer_connected', 'active'].includes(session.status))
+        if (!connected) continue
+        const installedVersion = session.viewerVersion || ''
+        rememberNativeViewerVerified(viewerPlatform)
+        if (viewerVersionNeedsUpdate(installedVersion, requiredVersion)) {
+          setViewerInstallPrompt({
+            kind: 'update',
+            nativeUrl,
+            downloadUrl: viewerDownloadUrl || '',
+            platform: viewerPlatform,
+            sessionId,
+            requiredVersion,
+            installedVersion,
+          })
+          setRemoteState(installedVersion
+            ? `Hi5Central Viewer ${installedVersion} needs updating to ${requiredVersion}.`
+            : `This Hi5Central Viewer is an older build. Update to ${requiredVersion}.`)
+          return
+        }
+
+        setViewerInstallPrompt(null)
+        setRemoteState('Hi5Central Viewer opened.')
+        return
+      } catch {}
+    }
+  }
+
+  async function openNativeViewer({ nativeUrl, viewerDownloadUrl, viewerPlatform, sessionId, requiredVersion, forceLaunch = false }) {
+    const resolvedPlatform = viewerPlatform || detectRemoteViewerClient().platform
+
+    // Safari shows its own "address is invalid" alert when an unregistered
+    // custom scheme is attempted. On first use, avoid probing the scheme and
+    // present the Mac setup/download choice directly. A successful native
+    // Viewer connection marks this browser so future sessions can launch
+    // directly while still checking the reported Viewer version.
+    if (resolvedPlatform === 'macos' && !forceLaunch && !nativeViewerPreviouslyVerified('macos')) {
+      setViewerInstallPrompt({
+        kind: 'setup',
+        nativeUrl,
+        downloadUrl: viewerDownloadUrl || '',
+        platform: resolvedPlatform,
+        sessionId,
+        requiredVersion,
+      })
+      setRemoteState('Hi5Central Viewer setup is required on this Mac.')
+      return false
+    }
+
+    setRemoteState('Opening Hi5Central Viewer…')
+
+    // Start the version check independently of browser focus/visibility
+    // heuristics. Firefox and some Linux desktop environments can launch a
+    // registered custom protocol without producing a reliable blur event.
+    verifyNativeViewerVersion({
+      sessionId,
+      nativeUrl,
+      viewerDownloadUrl,
+      viewerPlatform: resolvedPlatform,
+      requiredVersion,
+    }).catch(() => {})
+
+    const opened = await launchRemoteViewerProtocol(nativeUrl)
+    if (opened) {
+      setRemoteState('Hi5Central Viewer opened.')
+      return true
+    }
+
+    setViewerInstallPrompt({
+      kind: 'install',
+      nativeUrl,
+      downloadUrl: viewerDownloadUrl || '',
+      platform: resolvedPlatform,
+      sessionId,
+      requiredVersion,
+    })
+    setRemoteState('Hi5Central Viewer was not detected. Install it to continue this remote session.')
+    return false
+  }
+
+  async function retryNativeViewer() {
+    if (!viewerInstallPrompt?.nativeUrl) return
+    const current = viewerInstallPrompt
+    setViewerInstallPrompt(null)
+    await openNativeViewer({
+      nativeUrl: current.nativeUrl,
+      viewerDownloadUrl: current.downloadUrl,
+      viewerPlatform: current.platform,
+      sessionId: current.sessionId,
+      requiredVersion: current.requiredVersion,
+      forceLaunch: true,
+    })
+  }
+
   async function startRemote(mode = 'console') {
     if (!hasLiveAgent) {
       setRemoteState('Remote tools require the Hi5Central Agent on this device.')
@@ -1766,6 +2100,8 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       return
     }
     setRemoteBusy(true)
+    setRemoteBusyMode(mode)
+    setViewerInstallPrompt(null)
     setRemoteState(mode === 'backstage' ? 'Starting Background session…' : 'Starting remote desktop…')
     try {
       const viewerTarget = detectRemoteViewerClient()
@@ -1779,19 +2115,74 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           viewerClient: viewerTarget.viewerClient,
           viewerDeviceClass: viewerTarget.deviceClass,
           viewerDetection: viewerTarget.reason,
+          viewerPlatform: viewerTarget.platform,
+          waylandPersistence: mode === 'console' && waylandPersistenceSupported && waylandPersistence,
         }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'Unable to start remote session.')
       const launchUrl = payload.browserUrl || payload.nativeUrl
       if (!launchUrl) throw new Error('The remote session was created but no viewer launch URL was returned.')
-      setRemoteState(mode === 'backstage' ? 'Background session ready.' : 'Remote session ready.')
-      if (payload.browserUrl) window.open(payload.browserUrl, '_blank', 'noopener,noreferrer')
-      else window.location.href = payload.nativeUrl
+
+      if (payload.browserUrl) {
+        setRemoteState(mode === 'backstage' ? 'Background session ready.' : 'Remote session ready.')
+        window.open(payload.browserUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+
+      const nativePlatform = payload.viewerPlatform || viewerTarget.platform
+      if (nativePlatform === 'windows') {
+        // Preserve the established Windows Viewer launch path exactly. The
+        // protocol-detection/install flow below is specifically for the newly
+        // supported macOS and Linux desktop clients.
+        setRemoteState(mode === 'backstage' ? 'Background session ready.' : 'Remote session ready.')
+        window.location.href = payload.nativeUrl
+        return
+      }
+
+      await openNativeViewer({
+        nativeUrl: payload.nativeUrl,
+        viewerDownloadUrl: payload.viewerDownloadUrl,
+        viewerPlatform: nativePlatform,
+        sessionId: payload.session?.id,
+        requiredVersion: payload.viewerRequiredVersion,
+      })
     } catch (error) {
       setRemoteState(error?.message || 'Unable to start remote session.')
     } finally {
       setRemoteBusy(false)
+      setRemoteBusyMode('')
+    }
+  }
+
+  async function forgetRememberedWaylandAccess() {
+    if (!isWaylandDevice || !device.agentDeviceId || forgetWaylandBusy) return
+    if (!window.confirm('Forget remembered Wayland access for the currently logged-in Linux user? The next persistent remote session will require local approval again.')) return
+
+    setForgetWaylandBusy(true)
+    setRemoteState('Clearing remembered Wayland access…')
+    try {
+      const response = await fetch(
+        apiBase + '/api/v1/rmm/devices/' + encodeURIComponent(device.agentDeviceId) + '/wayland-persistence/forget',
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to forget remembered Wayland access.')
+      setWaylandPersistence(false)
+      setWaylandPersistenceStatus({
+        state: 'not_remembered',
+        remembered: false,
+        activeUser: payload.activeUser || waylandPersistenceStatus.activeUser || null,
+      })
+      setRemoteState(payload.message || 'Remembered Wayland access cleared. The next persistent session will ask for approval again.')
+    } catch (error) {
+      setRemoteState(error?.message || 'Unable to forget remembered Wayland access.')
+    } finally {
+      setForgetWaylandBusy(false)
     }
   }
 
@@ -1834,6 +2225,17 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       ? patchPendingParts.join(' · ') + ' pending'
       : 'No pending updates'
 
+  const waylandPersistenceStateLabel = {
+    checking: 'Checking…',
+    remembered: 'Remembered',
+    not_remembered: 'Not remembered',
+    offline: 'Offline',
+    upgrade_required: 'Status requires 0.3.153+',
+    unavailable: 'No active user',
+    unknown: 'Status unknown',
+    unsupported: 'Unsupported',
+  }[waylandPersistenceStatus.state] || 'Status unknown'
+
   let content
   if (section === 'hardware') content = <DeviceHardware device={device} />
   else if (section === 'windows') content = <DeviceWindows device={device} />
@@ -1859,13 +2261,44 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           {remoteState && <small className="rmm-device-action-message">{remoteState}</small>}
         </div>
         <div className="rmm-device-actions">
-          <button className="rmm-primary compact" disabled={remoteBusy || !hasLiveAgent || !canRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canRemote ? 'Start unattended console remote session' : 'Your role does not include unattended remote access'} onClick={() => startRemote('console')} type="button"><Monitor size={16} /> {remoteBusy ? 'Starting…' : 'Remote desktop'}</button>
+          <button className="rmm-primary compact" disabled={remoteBusy || !hasLiveAgent || !canRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canRemote ? 'Start unattended console remote session' : 'Your role does not include unattended remote access'} onClick={() => startRemote('console')} type="button"><Monitor size={16} /> {remoteBusy && remoteBusyMode === 'console' ? 'Starting…' : 'Remote desktop'}</button>
+          <button disabled={remoteBusy || !hasLiveAgent || !canBackstageRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canBackstageRemote ? 'Start an isolated Background remote session' : 'Your role does not include Background remote access'} onClick={() => startRemote('backstage')} type="button"><Code2 size={16} /> {remoteBusy && remoteBusyMode === 'backstage' ? 'Starting…' : 'Background'}</button>
           <button disabled={!hasLiveAgent} title={!hasLiveAgent ? 'Hi5Central Agent required' : 'Open the full device tools workspace'} onClick={() => selectSection('tools')} type="button"><TerminalSquare size={16} /> Tools</button>
           <button disabled={!hasLiveAgent} title={!hasLiveAgent ? 'Hi5Central Agent required' : `Run ${device.platform || device.os || 'device'} automations on this device`} onClick={() => setAutomationOpen(true)} type="button"><Zap size={16} /> Automations</button>
           <button disabled={!hasLiveAgent || !deviceOnline || powerBusy} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : 'Restart this device'} onClick={restartDevice} type="button"><RefreshCw size={16} /> {powerBusy ? 'Restarting…' : 'Restart'}</button>
           <button onClick={() => createIncident()} type="button"><AlertTriangle size={16} /> ITSM incident</button>
         </div>
       </header>
+
+      {isWaylandDevice && <section className="rmm-wayland-persistence-panel" aria-label="Wayland remote access options">
+        <div className="rmm-wayland-persistence-copy">
+          <span className="rmm-wayland-persistence-icon"><ShieldCheck size={17} /></span>
+          <div>
+            <strong>Persistent Wayland access <b>Limited</b><span className={'rmm-wayland-memory-state ' + waylandPersistenceStatus.state}>{waylandPersistenceStateLabel}</span></strong>
+            <small>{waylandPersistenceSupported ? 'Off uses a normal one-time Linux share prompt. When enabled, Hi5Central asks the desktop portal to remember screen, interaction and clipboard approval. The remembered badge is reported live by the endpoint.' : 'Requires Hi5Central Agent 0.3.151 or newer. Update the Agent before enabling remembered Wayland access.'}</small>
+          </div>
+        </div>
+        <label className="rmm-wayland-persistence-toggle">
+          <input
+            checked={waylandPersistence}
+            disabled={!hasLiveAgent || !deviceOnline || remoteBusy || !waylandPersistenceSupported}
+            onChange={(event) => setWaylandPersistence(event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            <strong>{waylandPersistenceStatus.remembered === true ? 'Use remembered access for this session' : 'Remember access for this remote session'}</strong>
+            <small>{!waylandPersistenceSupported ? 'Agent update required.' : waylandPersistence ? (waylandPersistenceStatus.remembered === true ? 'The stored Wayland approval will be used if the desktop portal accepts it.' : 'Persistent access requested · local approval is required the first time.') : 'One-time session · remembered permission will not be used.'}</small>
+          </span>
+        </label>
+        {waylandPersistenceStatus.remembered === true && <button
+          className="rmm-wayland-forget"
+          disabled={!hasLiveAgent || !deviceOnline || forgetWaylandBusy || !waylandPersistenceSupported}
+          onClick={forgetRememberedWaylandAccess}
+          type="button"
+        >
+          <Trash2 size={14} /> {forgetWaylandBusy ? 'Forgetting…' : 'Forget remembered access'}
+        </button>}
+      </section>}
 
       {deviceOffline && <div className="rmm-device-offline-banner"><WifiOff size={17} /><div><strong>Device offline</strong><span>Live controls are disabled and no new Agent jobs will be queued. Last-known inventory, Activity, Jobs and ITSM history remain available.</span></div><small>Last seen {device.lastSeen || 'not reported'}</small></div>}
       {!hasLiveAgent && <div className="rmm-device-offline-banner agentless"><Monitor size={17} /><div><strong>Hi5Central Agent not installed</strong><span>This device can show synchronized inventory, but live RMM controls require the Hi5Central Agent.</span></div></div>}
@@ -1882,6 +2315,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
       </nav>
 
       <div className={'rmm-device-section ' + (section === 'tools' ? 'is-tools' : '')}>{content}</div>
+      <ViewerInstallPrompt prompt={viewerInstallPrompt} onClose={() => setViewerInstallPrompt(null)} onRetry={retryNativeViewer} />
       {automationOpen ? <RmmDeviceAutomationPanel device={device} onClose={() => setAutomationOpen(false)} /> : null}
     </div>
   )

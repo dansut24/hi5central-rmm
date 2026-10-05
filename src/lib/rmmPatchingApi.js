@@ -169,6 +169,13 @@ export function updatePatchPolicy(policyId, policy) {
   })
 }
 
+export function evaluateOsPatchPolicies(dispatch = true) {
+  return request('/api/v1/rmm/os-updates/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({ dispatch }),
+  })
+}
+
 export function evaluateWindowsUpdatePolicies(dispatch = true) {
   return request('/api/v1/rmm/windows-updates/evaluate', {
     method: 'POST',

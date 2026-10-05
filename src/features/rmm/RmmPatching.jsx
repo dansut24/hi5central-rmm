@@ -26,7 +26,7 @@ import {
   archiveVendorSource,
   createPatchAssignment,
   createPatchPolicy,
-  evaluateWindowsUpdatePolicies,
+  evaluateOsPatchPolicies,
   pauseWindowsUpdateRollout,
   resumeWindowsUpdateRollout,
   rollbackWindowsUpdateRelease,
@@ -137,13 +137,92 @@ function readinessLabel(state) {
   return String(state || 'pending').replaceAll('_', ' ')
 }
 
+function osPolicyPlatformFlags(policy) {
+  const platforms = policy?.windows_rules?.platforms
+  if (!platforms || typeof platforms !== 'object' || !Object.keys(platforms).length) {
+    return { windows: true, linux: false, macos: false }
+  }
+  return {
+    windows: platforms.windows === true,
+    linux: platforms.linux === true,
+    macos: platforms.macos === true,
+  }
+}
+
+function osPolicyPlatformLabel(policy) {
+  const platforms = osPolicyPlatformFlags(policy)
+  const labels = []
+  if (platforms.windows) labels.push('Windows')
+  if (platforms.linux) labels.push('Linux')
+  if (platforms.macos) labels.push('macOS')
+  return labels.join(' · ') || 'No platforms'
+}
+
+function osScheduleTone(decision) {
+  if (decision?.action === 'install' && decision?.dispatched) return 'running'
+  if (decision?.action === 'scan' && decision?.dispatched) return 'running'
+  if (decision?.reason === 'agent_upgrade_required') return 'warning'
+  if (decision?.reason === 'device_offline') return 'neutral'
+  if (decision?.action === 'none') return 'healthy'
+  if (decision?.action === 'wait') return 'neutral'
+  return 'neutral'
+}
+
+function vulnerabilityExposureTypeLabel(exposure) {
+  if (exposure?.exposure_class === 'os') return exposure?.platform === 'macos' ? 'macOS' : 'Operating system'
+  if (exposure?.exposure_class === 'os_package') return 'OS package'
+  return 'Application'
+}
+
+function vulnerabilityRiskLabel(exposure) {
+  if (exposure?.kev) return 'CISA KEV'
+  const score = Number(exposure?.cvss_score || 0)
+  if (score >= 9) return 'Critical'
+  if (score >= 7) return 'High'
+  if (score >= 4) return 'Medium'
+  if (score > 0) return 'Low'
+  return exposure?.severity || 'Observed'
+}
+
+function vulnerabilityRiskTone(exposure) {
+  if (exposure?.kev || Number(exposure?.cvss_score || 0) >= 9) return 'critical'
+  if (Number(exposure?.cvss_score || 0) >= 7) return 'warning'
+  if (exposure?.remediation_state === 'available') return 'running'
+  return 'neutral'
+}
+
+function vulnerabilityRemediationLabel(exposure) {
+  if (exposure?.remediation_state === 'available') {
+    return exposure?.remediation_domain === 'os' ? 'Patch OS' : 'Patch application'
+  }
+  if (exposure?.remediation_state === 'in_progress') return 'In progress'
+  if (exposure?.remediation_state === 'remediated') return 'Remediated'
+  if (exposure?.remediation_state === 'review') return 'Review'
+  return 'No verified fix'
+}
+
+function osScheduleLabel(decision) {
+  if (!decision) return 'Awaiting evaluation'
+  if (decision.action === 'install') return decision.dispatched ? 'Install dispatched' : 'Install eligible'
+  if (decision.action === 'scan') return decision.dispatched ? 'Scan dispatched' : 'Scan required'
+  if (decision.action === 'none') return 'Current'
+  if (decision.reason === 'outside_maintenance_window') return 'Waiting for window'
+  if (decision.reason === 'device_offline') return 'Offline'
+  if (decision.reason === 'agent_upgrade_required') return 'Agent upgrade required'
+  if (decision.reason === 'platform_not_enabled') return 'Platform excluded'
+  if (decision.reason === 'automatic_install_disabled') return 'Manual'
+  if (decision.reason === 'recent_schedule_job') return 'Job in progress'
+  if (decision.reason === 'no_os_patch_policy') return 'No policy'
+  return readinessLabel(decision.reason || decision.action || 'waiting')
+}
+
 function PageHeading({ action }) {
   return (
     <div className="rmm-page-heading">
       <div>
         <span className="rmm-eyebrow">Maintenance</span>
         <h1>Patching</h1>
-        <p>Software catalogue, Windows Update and patch policy targeting.</p>
+        <p>Software catalogue, Windows, Linux and macOS update scheduling, and patch policy targeting.</p>
       </div>
       {action}
     </div>
@@ -527,6 +606,9 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
   const type = policyType === 'software' ? 'software' : 'os'
   const maintenance = policy?.maintenance_window || {}
   const windowsRules = policy?.windows_rules || {}
+  const targetPlatforms = windowsRules.platforms || {}
+  const unixRules = windowsRules.unix || {}
+  const hasTargetPlatforms = targetPlatforms && typeof targetPlatforms === 'object' && Object.keys(targetPlatforms).length > 0
   const windowsDelays = windowsRules.delayDays || {}
   const rollout = windowsRules.rollout || {}
   const rolloutWaves = Array.isArray(rollout.waves) ? rollout.waves : []
@@ -554,6 +636,10 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
     softwareTargetMode,
     softwareCatalogueIds: Array.isArray(softwareRules.catalogueIds) ? softwareRules.catalogueIds : [],
     windowsEnabled: type === 'os',
+    targetWindows: policy ? (hasTargetPlatforms ? targetPlatforms.windows === true : true) : true,
+    targetLinux: policy ? targetPlatforms.linux === true : true,
+    targetMacos: policy ? targetPlatforms.macos === true : true,
+    unixInstallMode: ['all', 'security_only'].includes(unixRules.installMode) ? unixRules.installMode : 'all',
     rebootPolicy: policy?.reboot_policy || 'never',
     maxRetries: policy?.max_retries ?? 2,
     maintenanceStart: maintenance.start || '18:00',
@@ -631,6 +717,10 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
   const softwareSelectionInvalid = form.softwareEnabled
     && form.softwareTargetMode === 'selected_catalogue'
     && !form.softwareCatalogueIds.length
+  const osPlatformSelectionInvalid = form.windowsEnabled
+    && !form.targetWindows
+    && !form.targetLinux
+    && !form.targetMacos
 
   return <div className="rmm-patch-modal-backdrop">
     <form className="rmm-patch-modal rmm-patch-policy-modal" onSubmit={(event) => {
@@ -638,7 +728,7 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
       if (form.name.trim().length < 2) return
       if (form.windowsEnabled && !form.maintenanceDays.length) return
       if (form.softwareEnabled && !form.softwareMaintenanceDays.length) return
-      if (softwareSelectionInvalid) return
+      if (softwareSelectionInvalid || osPlatformSelectionInvalid) return
       onSave({
         ...form,
         policyType: type,
@@ -651,6 +741,15 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
           days: form.maintenanceDays,
         },
         windowsRules: {
+          platforms: {
+            windows: form.targetWindows,
+            linux: form.targetLinux,
+            macos: form.targetMacos,
+          },
+          unix: {
+            installMode: form.unixInstallMode,
+            includeMajorMacOsUpgrades: false,
+          },
           autoInstall: form.windowsAutoInstall,
           includeDrivers: form.includeDrivers,
           includeFeatureUpdates: form.includeFeatureUpdates,
@@ -705,13 +804,20 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
       </div>
 
       {type === 'os' && <section className="rmm-policy-schedule rmm-policy-domain">
-        <div className="rmm-policy-section-title"><strong>OS patching</strong><small>Controls Windows Update ownership, deferrals, deployment waves and the OS maintenance window.</small></div>
+        <div className="rmm-policy-section-title"><strong>OS patching</strong><small>One maintenance policy can target Windows Update, native Linux package updates and Apple Software Update.</small></div>
+        <div className="rmm-policy-subsection-title"><strong>Target platforms</strong><small>Only selected operating systems receive this policy when the assignment is evaluated.</small></div>
         <div className="rmm-patch-checks">
-          <label><input checked={form.windowsAutoInstall} onChange={(event) => update('windowsAutoInstall', event.target.checked)} type="checkbox" /><span><strong>Automatically install eligible updates</strong><small>Hi5Central owns Windows Update on assigned endpoints; automatic installs run only while the OS maintenance window is open.</small></span></label>
+          <label><input checked={form.targetWindows} onChange={(event) => update('targetWindows', event.target.checked)} type="checkbox" /><span><strong>Windows</strong><small>Windows Update with category deferrals and staged rollout.</small></span></label>
+          <label><input checked={form.targetLinux} onChange={(event) => update('targetLinux', event.target.checked)} type="checkbox" /><span><strong>Linux</strong><small>APT/DNF native OS and package updates. Scheduled installs require Agent 0.3.155+.</small></span></label>
+          <label><input checked={form.targetMacos} onChange={(event) => update('targetMacos', event.target.checked)} type="checkbox" /><span><strong>macOS</strong><small>Apple Software Update. Scheduled installs require Agent 0.3.103+.</small></span></label>
+        </div>
+        {osPlatformSelectionInvalid && <div className="rmm-policy-inline-error"><AlertTriangle size={14} /> Select at least one operating system.</div>}
+        <div className="rmm-patch-checks">
+          <label><input checked={form.windowsAutoInstall} onChange={(event) => update('windowsAutoInstall', event.target.checked)} type="checkbox" /><span><strong>Automatically install eligible updates</strong><small>Automatic installs run only while the OS maintenance window is open. Platform-native update services remain the source of truth.</small></span></label>
         </div>
 
         <>
-          <div className="rmm-policy-subsection-title"><strong>OS maintenance window</strong><small>Windows updates wait for this window after their category deferral and rollout wave open.</small></div>
+          <div className="rmm-policy-subsection-title"><strong>OS maintenance window</strong><small>Windows, Linux and macOS scheduled installs wait for this window. Windows additionally honours its category deferrals and rollout wave.</small></div>
           <div className="rmm-patch-form-grid">
             <label>Window starts<input type="time" value={form.maintenanceStart} onChange={(event) => update('maintenanceStart', event.target.value)} /></label>
             <label>Window ends<input type="time" value={form.maintenanceEnd} onChange={(event) => update('maintenanceEnd', event.target.value)} /></label>
@@ -719,7 +825,8 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
             <div className="wide rmm-policy-days"><span>OS patch days</span><div>{dayLabels.map(([label, day]) => <button className={form.maintenanceDays.includes(day) ? 'active' : ''} key={day} onClick={() => toggleDay(day)} type="button">{label}</button>)}</div></div>
           </div>
 
-          <div className="rmm-policy-subsection-title"><strong>Update deferrals</strong><small>Delay each Windows Update class before staged rollout begins.</small></div>
+          {form.targetWindows && <>
+          <div className="rmm-policy-subsection-title"><strong>Windows update deferrals</strong><small>Delay each Windows Update class before staged rollout begins.</small></div>
           <div className="rmm-policy-delay-grid">
             {[
               ['windowsCriticalDelay', 'Critical', 'Immediate by default'],
@@ -759,6 +866,15 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
             <label>Reboot handling<select value={form.rebootPolicy} onChange={(event) => update('rebootPolicy', event.target.value)}><option value="never">Do not reboot automatically</option><option value="maintenance_window">Reboot during maintenance window</option><option value="notify_user">Notify user before reboot</option></select></label>
           </div>
           <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>Windows updates install without forcing an automatic restart today. Reboot-required endpoints remain flagged until coordinated reboot automation is enabled.</span></div>
+          </>}
+
+          {(form.targetLinux || form.targetMacos) && <>
+            <div className="rmm-policy-subsection-title"><strong>Linux / macOS automatic scope</strong><small>Choose what the Unix scheduler may install during the maintenance window.</small></div>
+            <div className="rmm-patch-form-grid">
+              <label>Automatic install scope<select value={form.unixInstallMode} onChange={(event) => update('unixInstallMode', event.target.value)}><option value="all">All eligible native updates</option><option value="security_only">Security updates only</option></select></label>
+            </div>
+            <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>macOS major-version upgrades are excluded from automatic schedules. They remain explicit/manual while normal Apple security and recommended updates can be scheduled.</span></div>
+          </>}
         </>
       </section>}
 
@@ -817,7 +933,7 @@ function PolicyModal({ policy, policyType = 'os', catalogue = [], onClose, onSav
         </>
       </section>}
 
-      <footer><button onClick={onClose} type="button">Cancel</button><button className="rmm-primary" disabled={type === 'software' && softwareSelectionInvalid} type="submit"><PackageCheck size={15} /> {policy ? 'Save policy' : 'Create policy'}</button></footer>
+      <footer><button onClick={onClose} type="button">Cancel</button><button className="rmm-primary" disabled={(type === 'software' && softwareSelectionInvalid) || (type === 'os' && osPlatformSelectionInvalid)} type="submit"><PackageCheck size={15} /> {policy ? 'Save policy' : 'Create policy'}</button></footer>
     </form>
   </div>
 }
@@ -1211,6 +1327,9 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
   const [bulkPatchBusy, setBulkPatchBusy] = useState(false)
   const [softwareSearch, setSoftwareSearch] = useState('')
   const [softwareStateFilter, setSoftwareStateFilter] = useState('all')
+  const [vulnerabilitySearch, setVulnerabilitySearch] = useState('')
+  const [vulnerabilityClassFilter, setVulnerabilityClassFilter] = useState('all')
+  const [vulnerabilityStatusFilter, setVulnerabilityStatusFilter] = useState('open')
   const [softwareProviderFilter, setSoftwareProviderFilter] = useState('all')
   const [softwareSourceFilter, setSoftwareSourceFilter] = useState('all')
   const [softwareHealthFilter, setSoftwareHealthFilter] = useState('all')
@@ -1376,12 +1495,47 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
   const qualificationProgress = bundle?.qualificationProgress || {}
   const qualificationFailureGroups = qualificationProgress.failureGroups || []
   const exposureSummary = bundle?.vulnerabilityExposures || {}
+  const vulnerabilitySearchText = vulnerabilitySearch.trim().toLowerCase()
+  const filteredVulnerabilityExposures = vulnerabilityExposureRows.filter((exposure) => {
+    if (vulnerabilityStatusFilter !== 'all' && exposure.status !== vulnerabilityStatusFilter) return false
+    if (vulnerabilityClassFilter !== 'all' && exposure.exposure_class !== vulnerabilityClassFilter) return false
+    if (!vulnerabilitySearchText) return true
+    return [
+      exposure.cve_id,
+      exposure.application_name,
+      exposure.package_name,
+      exposure.device_name,
+      exposure.device_reference,
+      exposure.operating_system,
+    ].filter(Boolean).join(' ').toLowerCase().includes(vulnerabilitySearchText)
+  })
   const overview = bundle?.overview || {}
   const exposedApps = applications.filter((item) => item.updateAvailable > 0)
   const mappedApps = applications.filter((item) => item.catalogue)
   const windowsUpdates = bundle?.windowsUpdates || { summary: {}, observations: [], decisions: [] }
   const windowsSummary = windowsUpdates.summary || {}
   const windowsPending = Number(windowsSummary.pending || 0)
+  const unixOsSchedules = bundle?.unixOsSchedules || []
+  const unixScheduleRows = unixOsSchedules.map((decision) => {
+    const device = patchDevices.find((item) => item.inventoryId === decision.inventoryId) || {}
+    const osUpdates = device.osUpdates || {}
+    return {
+      ...decision,
+      agentVersion: device.agentVersion || '',
+      online: device.online === true,
+      pendingCount: Number(osUpdates.pending_count || decision.pendingCount || 0),
+      securityCount: Number(osUpdates.security_count || 0),
+      lastScanUtc: osUpdates.last_scan_utc || null,
+      rebootRequired: osUpdates.reboot_required === true,
+    }
+  })
+  const linuxPending = unixScheduleRows
+    .filter((row) => row.platform === 'linux')
+    .reduce((total, row) => total + row.pendingCount, 0)
+  const macosPending = unixScheduleRows
+    .filter((row) => row.platform === 'macos')
+    .reduce((total, row) => total + row.pendingCount, 0)
+  const osPending = windowsPending + linuxPending + macosPending
   const windowsPendingRows = (windowsUpdates.observations || []).filter((item) => item.pending)
   const windowsDecisions = windowsUpdates.decisions || []
   const windowsReleases = windowsUpdates.releases || []
@@ -1955,12 +2109,12 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     setWindowsEvaluating(true)
     setError('')
     try {
-      const result = await evaluateWindowsUpdatePolicies(true)
+      const result = await evaluateOsPatchPolicies(true)
       const refreshed = await loadRmmPatching()
       setBundle(refreshed)
       return result
     } catch (requestError) {
-      setError(requestError?.message || 'Unable to evaluate Windows Update schedules.')
+      setError(requestError?.message || 'Unable to evaluate OS patch schedules.')
     } finally {
       setWindowsEvaluating(false)
     }
@@ -2042,7 +2196,8 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     {!softwareOnly && <nav className="rmm-patch-tabs">
       {[
         ['catalogue', 'Catalogue', catalogueFeed.total ?? catalogue.length],
-        ['windows', 'Windows Update', windowsPending],
+        ['windows', 'OS Updates', osPending],
+        ['vulnerabilities', 'Vulnerabilities', Number(exposureSummary.open || 0)],
         ['policies', 'Policies', policies.length],
       ].map(([id, label, count]) => <button className={tab === id ? 'active' : ''} key={id} onClick={() => setTab(id)} type="button">{label}<b>{count}</b></button>)}
     </nav>}
@@ -2235,7 +2390,7 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
     </section>}
 
     {tab === 'windows' && <section className="rmm-patch-panel">
-      <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Windows Update</span><h2>OS patch scheduling</h2><p>Windows Update remains the source of applicable patches. Hi5Central decides when eligible updates may install based on assignment, release delay and maintenance window.</p></div><button disabled={windowsEvaluating} onClick={evaluateWindowsPatching} type="button"><RefreshCw size={14} /> {windowsEvaluating ? 'Evaluating…' : 'Evaluate schedules'}</button></div>
+      <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Cross-platform OS updates</span><h2>OS patch scheduling</h2><p>Windows Update, Linux APT/DNF and Apple Software Update remain platform-native. Hi5Central controls assignment and maintenance-window execution across all three.</p></div><button disabled={windowsEvaluating} onClick={evaluateWindowsPatching} type="button"><RefreshCw size={14} /> {windowsEvaluating ? 'Evaluating…' : 'Evaluate schedules'}</button></div>
       <div className="rmm-windows-summary">
         <article><small>Pending</small><strong>{windowsSummary.pending || 0}</strong><span>{windowsSummary.devices || 0} device{Number(windowsSummary.devices || 0) === 1 ? '' : 's'}</span></article>
         <article><small>Critical / security</small><strong>{Number(windowsSummary.critical || 0) + Number(windowsSummary.security || 0)}</strong><span>{windowsSummary.critical || 0} critical · {windowsSummary.security || 0} security</span></article>
@@ -2244,6 +2399,27 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
         <article><small>Reboot required</small><strong>{windowsSummary.rebootRequired || 0}</strong><span>{windowsSummary.pausedReleases || 0} paused release{Number(windowsSummary.pausedReleases || 0) === 1 ? '' : 's'}</span></article>
         <article><small>Managed by Hi5Central</small><strong>{windowsSummary.managedDevices || 0}</strong><span>{windowsSummary.managementConflicts || 0} management conflict{Number(windowsSummary.managementConflicts || 0) === 1 ? '' : 's'}</span></article>
       </div>
+
+      {!!unixScheduleRows.length && <>
+        <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Linux & macOS</span><h3>Native OS update schedules</h3><p>Linux uses APT/DNF and macOS uses Apple Software Update. These endpoints follow the same assigned OS maintenance window without Windows-specific rollout rings.</p></div></div>
+        <div className="rmm-windows-summary">
+          <article><small>Linux pending</small><strong>{linuxPending}</strong><span>{unixScheduleRows.filter((row) => row.platform === 'linux').length} managed Linux device{unixScheduleRows.filter((row) => row.platform === 'linux').length === 1 ? '' : 's'}</span></article>
+          <article><small>macOS pending</small><strong>{macosPending}</strong><span>{unixScheduleRows.filter((row) => row.platform === 'macos').length} managed Mac{unixScheduleRows.filter((row) => row.platform === 'macos').length === 1 ? '' : 's'}</span></article>
+          <article><small>Unix security</small><strong>{unixScheduleRows.reduce((total, row) => total + row.securityCount, 0)}</strong><span>Native updater security classifications</span></article>
+        </div>
+        <div className="rmm-patch-table windows scheduled">
+          <div className="head"><span>Device</span><span>Platform</span><span>Pending</span><span>Policy</span><span>Schedule state</span><span>Agent</span></div>
+          {unixScheduleRows.map((row) => <div className="row" key={row.inventoryId}>
+            <span><strong>{row.deviceName || row.inventoryId}</strong><small>{row.lastScanUtc ? 'Last scan ' + new Date(row.lastScanUtc).toLocaleString() : 'OS scan not completed yet'}</small></span>
+            <span><StatusPill tone="neutral">{row.platform === 'macos' ? 'macOS' : 'Linux'}</StatusPill><small>{row.platform === 'macos' ? 'Apple Software Update' : 'APT / DNF'}</small></span>
+            <span><strong>{row.pendingCount}</strong><small>{row.securityCount} security{row.rebootRequired ? ' · reboot flagged' : ''}</small></span>
+            <span><strong>{row.policyName || 'No assigned OS policy'}</strong><small>{row.installMode === 'security_only' ? 'Security only' : 'All eligible native updates'}</small></span>
+            <span><StatusPill tone={osScheduleTone(row)}>{osScheduleLabel(row)}</StatusPill><small>{row.requiredAgentVersion ? 'Requires Agent ' + row.requiredAgentVersion + '+' : readinessLabel(row.reason || '')}</small></span>
+            <span>{row.online ? <StatusPill tone="healthy">Online</StatusPill> : <StatusPill tone="neutral"><WifiOff size={12} /> Offline</StatusPill>}<small>{row.agentVersion ? 'Agent ' + row.agentVersion : 'Agent version unknown'}</small></span>
+          </div>)}
+        </div>
+        <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>macOS major-version upgrades are deliberately excluded from automatic schedules. Linux scheduled installs require Agent 0.3.155+; macOS scheduled installs require Agent 0.3.103+.</span></div>
+      </>}
 
       {!!windowsManagement.length && <>
         <div className="rmm-card-heading"><div><span className="rmm-eyebrow">Windows ownership</span><h3>Update management state</h3><p>Hi5Central applies a minimal local Windows Update policy only when an OS patch policy is assigned. Existing WSUS, Group Policy or MDM update management is never overwritten.</p></div></div>
@@ -2313,10 +2489,62 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
       {!windowsByDevice.length && <div className="rmm-empty"><Monitor size={24} /><strong>{loading ? 'Loading Windows Update inventory…' : 'No pending Windows updates'}</strong><span>Applicable Windows updates are populated by managed Agent inventory scans.</span></div>}
       <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>Scheduled installs are server-authoritative. Offline devices are not left with queued update jobs; they are re-evaluated when online. Feature and driver updates remain excluded unless the assigned policy explicitly enables them.</span></div>
     </section>}
+    {tab === 'vulnerabilities' && <section className="rmm-patch-panel">
+      <div className="rmm-card-heading">
+        <div><span className="rmm-eyebrow">Cross-platform exposure management</span><h2>Vulnerabilities</h2><p>Application CVEs remain in Software Patching. Native Linux packages and macOS security exposures are kept separate and remediate through OS Patching.</p></div>
+        <button disabled={loading} onClick={refresh} type="button"><RefreshCw size={14} /> Refresh</button>
+      </div>
+
+      <div className="rmm-windows-summary">
+        <article><small>Open</small><strong>{exposureSummary.open || 0}</strong><span>{exposureSummary.fix_available_open || 0} with verified remediation</span></article>
+        <article><small>Applications</small><strong>{exposureSummary.application_open || 0}</strong><span>Software-patching domain</span></article>
+        <article><small>OS packages</small><strong>{exposureSummary.os_package_open || 0}</strong><span>Linux APT / DNF packages</span></article>
+        <article><small>Native OS</small><strong>{exposureSummary.os_open || 0}</strong><span>macOS security releases</span></article>
+        <article><small>Critical</small><strong>{exposureSummary.critical_open || 0}</strong><span>CVSS 9.0+</span></article>
+        <article><small>CISA KEV</small><strong>{exposureSummary.kev_open || 0}</strong><span>Known exploited vulnerabilities</span></article>
+      </div>
+
+      <div className="rmm-catalogue-toolbar">
+        <label className="search"><Search size={14} /><input value={vulnerabilitySearch} onChange={(event) => setVulnerabilitySearch(event.target.value)} placeholder="Search CVE, device, application or package…" /></label>
+        <select aria-label="Vulnerability class" value={vulnerabilityClassFilter} onChange={(event) => setVulnerabilityClassFilter(event.target.value)}>
+          <option value="all">All exposure types</option>
+          <option value="application">Applications</option>
+          <option value="os_package">OS packages</option>
+          <option value="os">Native OS</option>
+        </select>
+        <select aria-label="Vulnerability status" value={vulnerabilityStatusFilter} onChange={(event) => setVulnerabilityStatusFilter(event.target.value)}>
+          <option value="open">Open</option>
+          <option value="review">Review</option>
+          <option value="remediated">Remediated</option>
+          <option value="all">All states</option>
+        </select>
+        <span className="summary">{filteredVulnerabilityExposures.length} exposure{filteredVulnerabilityExposures.length === 1 ? '' : 's'}</span>
+      </div>
+
+      <div className="rmm-patch-table windows scheduled">
+        <div className="head"><span>Exposure</span><span>Device</span><span>Type</span><span>Version / fix</span><span>Risk</span><span>Remediation</span></div>
+        {filteredVulnerabilityExposures.map((exposure) => {
+          const osDomain = exposure.remediation_domain === 'os'
+          const canRemediate = exposure.status === 'open' && exposure.remediation_state === 'available' && exposure.device_online
+          const busy = remediatingExposureId === exposure.id
+          const provider = exposure.remediation_provider || exposure.package_manager || (osDomain ? 'Native updater' : 'Software catalogue')
+          return <div className="row" key={exposure.id}>
+            <span><strong>{exposure.cve_id}</strong><small>{exposure.application_name || exposure.package_name || 'Exposure'}{exposure.kev ? ' · CISA KEV' : ''}</small></span>
+            <span><strong>{exposure.device_name || exposure.device_reference}</strong><small>{exposure.operating_system || exposure.platform || 'Managed endpoint'} · {exposure.device_online ? 'Online' : 'Offline'}</small></span>
+            <span><StatusPill tone={osDomain ? 'running' : 'neutral'}>{vulnerabilityExposureTypeLabel(exposure)}</StatusPill><small>{osDomain ? 'OS patch policy' : 'Software patch policy'}{exposure.package_manager ? ' · ' + exposure.package_manager.toUpperCase() : ''}</small></span>
+            <span><strong>{exposure.installed_version || 'Unknown'}{exposure.fixed_version ? ' → ' + exposure.fixed_version : ''}</strong><small>{exposure.remediation_target_version && exposure.remediation_target_version !== exposure.fixed_version ? 'Remediation target ' + exposure.remediation_target_version : exposure.remediation_target_version ? 'Verified target' : 'Fixed version not yet deployable'}</small></span>
+            <span><StatusPill tone={vulnerabilityRiskTone(exposure)}>{vulnerabilityRiskLabel(exposure)}</StatusPill><small>{exposure.cvss_score ? 'CVSS ' + exposure.cvss_score : 'CVSS pending'}{exposure.epss_score ? ' · EPSS ' + (Number(exposure.epss_score) * 100).toFixed(1) + '%' : ''}</small></span>
+            <span><div className="rmm-row-actions"><button className={canRemediate ? 'rmm-primary compact' : ''} disabled={!canRemediate || busy} onClick={() => remediateExposure(exposure)} type="button">{busy ? 'Starting…' : vulnerabilityRemediationLabel(exposure)}</button></div><small>{provider}{exposure.remediation_due_at ? ' · due ' + new Date(exposure.remediation_due_at).toLocaleDateString() : ''}</small></span>
+          </div>
+        })}
+      </div>
+      {!filteredVulnerabilityExposures.length && <div className="rmm-empty"><ShieldCheck size={24} /><strong>No vulnerability exposures match this view</strong><span>Application and native OS/package CVEs are kept separate and routed to the correct remediation domain.</span></div>}
+      <div className="rmm-patch-security-note"><ShieldCheck size={16} /><span>Linux system-package CVEs are never treated as ordinary uninstallable applications. macOS OS CVEs are matched to Apple security releases; major macOS upgrades remain excluded from automatic remediation.</span></div>
+    </section>}
     {tab === 'policies' && <section className="rmm-patch-panel rmm-policy-lists">
       <section className="rmm-policy-list-section">
         <div className="rmm-card-heading">
-          <div><span className="rmm-eyebrow">Windows management</span><h2>OS patching policies</h2><p>Windows Update ownership, maintenance windows, deferrals and deployment waves. OS policies are assigned independently from software policies.</p></div>
+          <div><span className="rmm-eyebrow">Cross-platform OS management</span><h2>OS patching policies</h2><p>Target Windows, Linux and macOS from the same OS policy while retaining platform-native update engines. OS policies remain independent from software policies.</p></div>
           <button className="rmm-primary compact" onClick={() => { setEditingPolicy(null); setPolicyModalType('os'); setShowPolicy(true) }} type="button"><Plus size={14} /> New OS policy</button>
         </div>
         <div className="rmm-patch-policy-grid">
@@ -2325,16 +2553,17 @@ export function RmmPatching({ devices = [], softwareOnly = false }) {
             <p>{policy.description || 'No description provided.'}</p>
             <div className="rmm-policy-domain-summary">
               <div>
-                <div className="domain-head"><strong>Windows Update</strong><StatusPill tone="healthy">{policy.windows_rules?.autoInstall ? 'Automatic' : 'Managed'}</StatusPill></div>
+                <div className="domain-head"><strong>{osPolicyPlatformLabel(policy)}</strong><StatusPill tone="healthy">{policy.windows_rules?.autoInstall ? 'Automatic' : 'Scheduled'}</StatusPill></div>
                 <small>{policy.maintenance_window?.start || '18:00'}–{policy.maintenance_window?.end || '05:00'} · {(policy.maintenance_window?.days || [1,2,3,4,5]).map((day) => ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'][day]).join(' · ')} · {policy.maintenance_window?.timezone || 'Europe/London'}</small>
-                <small>Critical {policy.windows_rules?.delayDays?.critical ?? 0}d · Security {policy.windows_rules?.delayDays?.security ?? policy.deployment_delay_days}d · Quality {policy.windows_rules?.delayDays?.quality ?? policy.deployment_delay_days}d · Feature {policy.windows_rules?.includeFeatureUpdates ? (policy.windows_rules?.delayDays?.feature ?? 14) + 'd' : 'off'} · Drivers {policy.windows_rules?.includeDrivers ? (policy.windows_rules?.delayDays?.driver ?? 14) + 'd' : 'off'}</small>
-                {policy.windows_rules?.rollout?.enabled && <small>Rollout · {(policy.windows_rules.rollout.waves || []).map((wave) => (wave.name || wave.id) + ' ' + wave.percentage + '% @ +' + wave.delayDays + 'd').join(' · ')} · deadline +{policy.windows_rules.rollout.deadlineDays ?? 7}d</small>}
+                {osPolicyPlatformFlags(policy).windows && <small>Windows · Critical {policy.windows_rules?.delayDays?.critical ?? 0}d · Security {policy.windows_rules?.delayDays?.security ?? policy.deployment_delay_days}d · Quality {policy.windows_rules?.delayDays?.quality ?? policy.deployment_delay_days}d · Feature {policy.windows_rules?.includeFeatureUpdates ? (policy.windows_rules?.delayDays?.feature ?? 14) + 'd' : 'off'} · Drivers {policy.windows_rules?.includeDrivers ? (policy.windows_rules?.delayDays?.driver ?? 14) + 'd' : 'off'}</small>}
+                {(osPolicyPlatformFlags(policy).linux || osPolicyPlatformFlags(policy).macos) && <small>Linux / macOS · {policy.windows_rules?.unix?.installMode === 'security_only' ? 'Security updates only' : 'All eligible native updates'} · macOS major upgrades excluded</small>}
+                {osPolicyPlatformFlags(policy).windows && policy.windows_rules?.rollout?.enabled && <small>Windows rollout · {(policy.windows_rules.rollout.waves || []).map((wave) => (wave.name || wave.id) + ' ' + wave.percentage + '% @ +' + wave.delayDays + 'd').join(' · ')} · deadline +{policy.windows_rules.rollout.deadlineDays ?? 7}d</small>}
               </div>
             </div>
             <footer><span>{assignments.filter((assignment) => assignment.policy_id === policy.id && assignment.enabled !== false).length} assignments</span><div><button disabled={saving} onClick={() => { setEditingPolicy(policy); setPolicyModalType('os'); setShowPolicy(true) }} type="button"><Wrench size={14} /> Edit</button><button disabled={saving} onClick={() => setAssignPolicy(policy)} type="button"><GitBranch size={14} /> Assign scope</button></div></footer>
           </article>)}
         </div>
-        {!osPolicies.length && <div className="rmm-empty"><Monitor size={24} /><strong>No OS patching policies</strong><span>Create an OS policy to manage Windows Update schedules and rollout.</span></div>}
+        {!osPolicies.length && <div className="rmm-empty"><Monitor size={24} /><strong>No OS patching policies</strong><span>Create one OS policy for Windows, Linux and/or macOS maintenance schedules.</span></div>}
         {!!assignments.filter((assignment) => osPolicies.some((policy) => policy.id === assignment.policy_id)).length && <div className="rmm-patch-assignments">
           <div className="head"><span>OS scope</span><span>Policy</span><span>Priority</span><span /></div>
           {assignments.filter((assignment) => osPolicies.some((policy) => policy.id === assignment.policy_id)).map((assignment) => <div className="row" key={assignment.id}><span><strong>{assignment.scope_name || assignment.scope_id}</strong><small>{assignment.scope_type}</small></span><span><strong>{osPolicies.find((policy) => policy.id === assignment.policy_id)?.name || assignment.policy_id}</strong></span><span><strong>{assignment.priority}</strong></span><span><button disabled={saving} onClick={() => removeAssignment(assignment)} type="button"><Trash2 size={14} /></button></span></div>)}
