@@ -54,6 +54,9 @@ function linuxInstallCommand(formatValue = '') {
       : format === 'rpm'
         ? 'hi5central-agent-deployment_x86_64.rpm'
         : ''
+  const bundleName = ['run', 'deb', 'rpm'].includes(format)
+    ? 'Hi5CentralAgentDeployment-Linux-' + format.toUpperCase() + '.tar.gz'
+    : ''
   const rootCommand = format === 'run'
     ? 'if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y curl tar; elif command -v dnf >/dev/null 2>&1; then dnf install -y curl tar; elif command -v yum >/dev/null 2>&1; then yum install -y curl tar; else echo "curl and tar are required before installing the Hi5Central Agent."; exit 1; fi; fi && chmod 0755 "$HI5_DIR/Hi5CentralAgentDeployment-Linux.run" && "$HI5_DIR/Hi5CentralAgentDeployment-Linux.run" --config "$HI5_DIR/Hi5CentralDeployment.json"'
     : format === 'deb'
@@ -61,14 +64,19 @@ function linuxInstallCommand(formatValue = '') {
       : format === 'rpm'
         ? 'install -d -m 700 /etc/hi5central && install -m 600 "$HI5_DIR/Hi5CentralDeployment.json" /etc/hi5central/deployment.json && if command -v dnf >/dev/null 2>&1; then dnf install -y "$HI5_DIR/hi5central-agent-deployment_x86_64.rpm"; elif command -v yum >/dev/null 2>&1; then yum localinstall -y "$HI5_DIR/hi5central-agent-deployment_x86_64.rpm"; else rpm -U "$HI5_DIR/hi5central-agent-deployment_x86_64.rpm"; fi'
         : ''
-  if (!fileName || !rootCommand) return ''
-  return [
+  if (!fileName || !bundleName || !rootCommand) return ''
+  return '(' + [
     'HI5_DIR="$PWD"',
-    `if [ ! -f "$HI5_DIR/Hi5CentralDeployment.json" ] || [ ! -f "$HI5_DIR/${fileName}" ]; then HI5_DOWNLOADS="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DOWNLOAD 2>/dev/null || true)"; [ -n "$HI5_DOWNLOADS" ] || HI5_DOWNLOADS="$HOME/Downloads"; HI5_DIR="$HI5_DOWNLOADS"; fi`,
-    `[ -f "$HI5_DIR/Hi5CentralDeployment.json" ] && [ -f "$HI5_DIR/${fileName}" ] || { echo "Hi5Central installer files were not found in the current folder or Downloads."; exit 1; }`,
-    `HI5_INSTALL='${rootCommand}'`,
-    'if [ "$(id -u)" -eq 0 ]; then HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; elif command -v sudo >/dev/null 2>&1 && id -nG | tr " " "\\n" | grep -Eq "^(sudo|wheel)$"; then sudo /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; elif command -v pkexec >/dev/null 2>&1; then pkexec /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; else echo "Administrator privileges are required. Enter the root password when prompted."; su -c "HI5_DIR=\\\"$HI5_DIR\\\" /bin/sh -c \'$HI5_INSTALL\'"; fi',
-  ].join('; ')
+    'HI5_EXTRACT=""',
+    'HI5_BUNDLE="$HI5_DIR/' + bundleName + '"',
+    'if { [ ! -f "$HI5_DIR/Hi5CentralDeployment.json" ] || [ ! -f "$HI5_DIR/' + fileName + '" ]; } && [ ! -f "$HI5_BUNDLE" ]; then HI5_DOWNLOADS="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DOWNLOAD 2>/dev/null || true)"; [ -n "$HI5_DOWNLOADS" ] || HI5_DOWNLOADS="$HOME/Downloads"; HI5_DIR="$HI5_DOWNLOADS"; HI5_BUNDLE="$HI5_DIR/' + bundleName + '"; fi',
+    'if { [ ! -f "$HI5_DIR/Hi5CentralDeployment.json" ] || [ ! -f "$HI5_DIR/' + fileName + '" ]; } && [ -f "$HI5_BUNDLE" ]; then command -v tar >/dev/null 2>&1 || { echo "tar is required to unpack the Hi5Central deployment bundle."; exit 1; }; HI5_EXTRACT="$(mktemp -d /tmp/hi5central-deploy.XXXXXX)" || exit 1; tar -xzf "$HI5_BUNDLE" -C "$HI5_EXTRACT" || { rm -rf "$HI5_EXTRACT"; exit 1; }; HI5_DIR="$HI5_EXTRACT"; fi',
+    '[ -f "$HI5_DIR/Hi5CentralDeployment.json" ] && [ -f "$HI5_DIR/' + fileName + '" ] || { echo "Hi5Central deployment bundle or installer files were not found in the current folder or Downloads."; [ -n "$HI5_EXTRACT" ] && rm -rf "$HI5_EXTRACT"; exit 1; }',
+    'HI5_INSTALL=' + JSON.stringify(rootCommand),
+    'if [ "$(id -u)" -eq 0 ]; then HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; elif command -v sudo >/dev/null 2>&1 && id -nG | tr " " "\\n" | grep -Eq "^(sudo|wheel)$"; then sudo /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; elif command -v pkexec >/dev/null 2>&1; then pkexec /usr/bin/env HI5_DIR="$HI5_DIR" /bin/sh -c "$HI5_INSTALL"; HI5_STATUS=$?; else echo "Administrator privileges are required. Enter the root password when prompted."; su -c "HI5_DIR=\\\"$HI5_DIR\\\" /bin/sh -c \'$HI5_INSTALL\'"; HI5_STATUS=$?; fi',
+    '[ -n "$HI5_EXTRACT" ] && rm -rf "$HI5_EXTRACT"',
+    'exit "$HI5_STATUS"',
+  ].join('; ') + ')'
 }
 
 function installCommand(pkg, serverCommand = '') {
