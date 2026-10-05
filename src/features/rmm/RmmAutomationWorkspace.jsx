@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Check, ChevronDown, ChevronRight, Code2, Laptop, ListChecks, Play, Plus,
+  Apple, Check, ChevronRight, Code2, ListChecks, Monitor, Play, Plus,
   RefreshCw, Save, ShieldCheck, TerminalSquare, Upload, X,
 } from 'lucide-react'
 import './RmmAutomationWorkspace.css'
@@ -36,10 +36,38 @@ function Status({ children }) {
   return <span className={`rmm-auto-status ${statusTone(children)}`}>{children}</span>
 }
 
+function normalizePlatform(value = '') {
+  const text = String(value || '').toLowerCase()
+  if (text.includes('win')) return 'windows'
+  if (text.includes('mac') || text.includes('darwin') || text.includes('os x')) return 'macos'
+  if (text.includes('linux')) return 'linux'
+  return ''
+}
+
+function platformLabel(value = '') {
+  const platform = normalizePlatform(value)
+  if (platform === 'macos') return 'macOS'
+  if (platform === 'linux') return 'Linux'
+  if (platform === 'windows') return 'Windows'
+  return 'Unknown OS'
+}
+
+function PlatformIcon({ platform, size = 16 }) {
+  const normalized = normalizePlatform(platform)
+  if (normalized === 'macos') return <Apple size={size} />
+  if (normalized === 'linux') return <TerminalSquare size={size} />
+  return <Monitor size={size} />
+}
+
+function devicePlatform(device) {
+  return normalizePlatform(device?.platform || device?.operating_system || device?.os || '')
+}
+
 function AutomationEditor({ automation, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({
     name: automation?.name || '',
     description: automation?.description || '',
+    platform: normalizePlatform(automation?.platform) || 'windows',
     category: automation?.category || 'General',
     timeoutSeconds: automation?.latest_timeout_seconds || automation?.published_timeout_seconds || 120,
     scriptText: automation?.latest_script_text || '# Hi5Central automation\n',
@@ -74,10 +102,11 @@ function AutomationEditor({ automation, onClose, onSaved }) {
       <div className="rmm-auto-form-grid">
         <label><span>Name</span><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Clear Teams cache" /></label>
         <label><span>Category</span><input value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="Maintenance" /></label>
+        <label><span>Operating system</span><select disabled={Boolean(automation?.published_version_id)} value={form.platform} onChange={(e) => set('platform', e.target.value)}><option value="windows">Windows</option><option value="macos">macOS</option><option value="linux">Linux</option></select></label>
         <label className="wide"><span>Description</span><input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Explain what this action does and when to use it." /></label>
-        <label><span>Run as</span><input disabled value="Local SYSTEM" /></label>
+        <label><span>Run as</span><input disabled value={form.platform === 'windows' ? 'Local SYSTEM' : 'root'} /></label>
         <label><span>Timeout (seconds)</span><input min="5" max="3600" type="number" value={form.timeoutSeconds} onChange={(e) => set('timeoutSeconds', Number(e.target.value))} /></label>
-        <label className="wide"><span>PowerShell</span><textarea className="script" spellCheck="false" value={form.scriptText} onChange={(e) => set('scriptText', e.target.value)} /></label>
+        <label className="wide"><span>{form.platform === 'windows' ? 'PowerShell' : 'Shell script'}</span><textarea className="script" spellCheck="false" value={form.scriptText} onChange={(e) => set('scriptText', e.target.value)} /></label>
         <label className="wide"><span>Release notes</span><input value={form.releaseNotes} onChange={(e) => set('releaseNotes', e.target.value)} placeholder="Optional note describing this revision" /></label>
       </div>
       <footer><button onClick={onClose} type="button">Cancel</button><button className="rmm-primary compact" disabled={busy} onClick={save} type="button"><Save size={15} /> {busy ? 'Saving…' : 'Save draft'}</button></footer>
@@ -86,7 +115,7 @@ function AutomationEditor({ automation, onClose, onSaved }) {
 }
 
 function RunPanel({ automation, devices, onClose, onQueued }) {
-  const available = useMemo(() => devices.filter((device) => device.agent_device_id), [devices])
+  const available = useMemo(() => devices.filter((device) => device.agent_device_id && devicePlatform(device) === normalizePlatform(automation.platform)), [devices, automation.platform])
   const onlineAvailable = useMemo(() => available.filter((device) => device.agent_online), [available])
   const offlineCount = available.length - onlineAvailable.length
   const [selected, setSelected] = useState([])
@@ -108,8 +137,8 @@ function RunPanel({ automation, devices, onClose, onQueued }) {
       {error ? <div className="rmm-auto-error">{error}</div> : null}
       <div className="rmm-auto-target-toolbar"><strong>{selected.length} selected</strong><button disabled={!onlineAvailable.length} onClick={() => setSelected(onlineAvailable.map((device) => device.agent_device_id))} type="button">Select all online</button><button onClick={() => setSelected([])} type="button">Clear</button></div>
       {offlineCount > 0 ? <div className="rmm-auto-offline-note">{offlineCount} offline device{offlineCount === 1 ? '' : 's'} cannot be selected. Hi5Central will not queue work for reconnect.</div> : null}
-      <div className="rmm-auto-target-list">{available.map((device) => <label className={device.agent_online ? '' : 'is-offline'} key={device.agent_device_id}><input checked={selected.includes(device.agent_device_id)} disabled={!device.agent_online} onChange={() => toggle(device.agent_device_id)} type="checkbox" /><span className="rmm-device-icon neutral"><Laptop size={16} /></span><span><strong>{device.name}</strong><small>{device.user_display_name || device.agent_active_user || device.reference} · {device.agent_online ? 'Online' : 'Offline · live actions disabled'}</small></span></label>)}</div>
-      {!available.length ? <div className="rmm-auto-empty">No enrolled Hi5Central Agent devices are available.</div> : null}
+      <div className="rmm-auto-target-list">{available.map((device) => <label className={device.agent_online ? '' : 'is-offline'} key={device.agent_device_id}><input checked={selected.includes(device.agent_device_id)} disabled={!device.agent_online} onChange={() => toggle(device.agent_device_id)} type="checkbox" /><span className="rmm-device-icon neutral"><PlatformIcon platform={automation.platform} size={16} /></span><span><strong>{device.name}</strong><small>{device.user_display_name || device.agent_active_user || device.reference} · {device.agent_online ? 'Online' : 'Offline · live actions disabled'}</small></span></label>)}</div>
+      {!available.length ? <div className="rmm-auto-empty">No enrolled {platformLabel(automation.platform)} Agent devices are available.</div> : null}
       {available.length > 0 && !onlineAvailable.length ? <div className="rmm-auto-empty">All enrolled Agent devices are offline. No jobs can be started.</div> : null}
       <footer><button onClick={onClose} type="button">Cancel</button><button className="rmm-primary compact" disabled={busy || !selected.length} onClick={run} type="button"><Play size={15} /> {busy ? 'Starting…' : `Run on ${selected.length || 0} online device${selected.length === 1 ? '' : 's'}`}</button></footer>
     </section>
@@ -117,7 +146,7 @@ function RunPanel({ automation, devices, onClose, onQueued }) {
 }
 
 function TrayPolicy({ automations, policy, onSaved }) {
-  const published = automations.filter((item) => item.status === 'published' && item.published_version_id)
+  const published = automations.filter((item) => item.status === 'published' && item.published_version_id && normalizePlatform(item.platform) === 'windows')
   const [enabled, setEnabled] = useState(Boolean(policy?.enabled))
   const [supportName, setSupportName] = useState(policy?.support?.displayName || '')
   const [supportUrl, setSupportUrl] = useState(policy?.support?.portalUrl || '')
@@ -156,6 +185,69 @@ function TrayPolicy({ automations, policy, onSaved }) {
   </section>
 }
 
+export function RmmDeviceAutomationPanel({ device, onClose }) {
+  const [automations, setAutomations] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const platform = devicePlatform(device)
+  const agentDeviceId = device?.agentDeviceId || device?.agent_device_id || ''
+  const online = device?.agent_online === true || String(device?.status || '').toLowerCase() === 'online'
+
+  useEffect(() => {
+    let active = true
+    api('/api/v1/rmm/automations')
+      .then((payload) => { if (active) setAutomations(payload.automations || []) })
+      .catch((loadError) => { if (active) setError(loadError.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [device?.id, agentDeviceId])
+
+  const compatible = useMemo(
+    () => automations.filter((item) => item.status === 'published' && item.published_version_id && normalizePlatform(item.platform) === platform),
+    [automations, platform],
+  )
+
+  async function run(item) {
+    if (!agentDeviceId || !online || busyId) return
+    if (item.name === 'macOS - Reset Remote Permissions' && !window.confirm('Reset Hi5Central remote permissions on this Mac? The next remote session will request Screen Recording and Accessibility permissions again.')) return
+    setBusyId(item.id); setError(''); setNotice('')
+    try {
+      const result = await api(`/api/v1/rmm/automations/${encodeURIComponent(item.id)}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentDeviceIds: [agentDeviceId] }),
+      })
+      setNotice(`${item.name} started on ${device?.name || 'this device'} · ${result.jobIds?.[0]?.slice(0, 8) || 'job queued'}`)
+    } catch (runError) {
+      setError(runError.message)
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  return <div className="rmm-auto-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="rmm-auto-run-panel rmm-auto-device-panel" role="dialog" aria-modal="true">
+      <header><div><span className="rmm-eyebrow">Device automations</span><h2>{device?.name || 'Managed device'}</h2><p><span className="rmm-auto-platform-inline"><PlatformIcon platform={platform} size={14} /> {platformLabel(platform)}</span> · Published automations for this device only</p></div><button onClick={onClose} type="button"><X size={18} /></button></header>
+      {error ? <div className="rmm-auto-error device-modal-message">{error}</div> : null}
+      {notice ? <div className="rmm-auto-notice device-modal-message"><Check size={15} /> {notice}</div> : null}
+      {!online && agentDeviceId ? <div className="rmm-auto-offline-note">This device is offline. Compatible automations are shown, but live execution is disabled until it reconnects.</div> : null}
+      {!agentDeviceId ? <div className="rmm-auto-offline-note">Hi5Central Agent is not installed on this device.</div> : null}
+      <div className="rmm-auto-device-list">
+        {compatible.map((item) => <article key={item.id}>
+          <span className="rmm-script-icon"><PlatformIcon platform={item.platform} size={18} /></span>
+          <div><span className="rmm-eyebrow">{item.category} · {platformLabel(item.platform)}</span><strong>{item.name}</strong><small>{item.description || 'Published automation'} · v{item.published_version_number}</small></div>
+          <button className="rmm-primary compact" disabled={!online || !agentDeviceId || Boolean(busyId)} onClick={() => run(item)} type="button"><Play size={14} /> {busyId === item.id ? 'Starting…' : 'Run'}</button>
+        </article>)}
+        {loading ? <div className="rmm-auto-empty">Loading compatible automations…</div> : null}
+        {!loading && !compatible.length ? <div className="rmm-auto-empty large"><PlatformIcon platform={platform} size={25} /><strong>No {platformLabel(platform)} automations</strong><span>Publish a {platformLabel(platform)} automation from the Automation library and it will appear here automatically.</span></div> : null}
+      </div>
+      <footer><button onClick={onClose} type="button">Close</button></footer>
+    </section>
+  </div>
+}
+
 export function RmmAutomation() {
   const [automations, setAutomations] = useState([])
   const [devices, setDevices] = useState([])
@@ -163,6 +255,7 @@ export function RmmAutomation() {
   const [editor, setEditor] = useState(null)
   const [runAutomation, setRunAutomation] = useState(null)
   const [tab, setTab] = useState('library')
+  const [platformFilter, setPlatformFilter] = useState('all')
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -189,14 +282,17 @@ export function RmmAutomation() {
 
   const published = automations.filter((item) => item.status === 'published').length
   const drafts = automations.filter((item) => item.latest_version_state === 'draft').length
+  const filteredAutomations = platformFilter === 'all' ? automations : automations.filter((item) => normalizePlatform(item.platform) === platformFilter)
 
   return <>
     <div className="rmm-page-heading"><div><span className="rmm-eyebrow">Automation</span><h1>Scripts & automation</h1><p>Build versioned, trusted actions once and invoke the same published version from technicians, schedules, remediation or the end-user tray.</p></div><div className="rmm-auto-heading-actions"><button onClick={() => load().catch((loadError) => setError(loadError.message))} type="button"><RefreshCw size={15} /> Refresh</button><button className="rmm-primary compact" onClick={() => setEditor({ new: true })} type="button"><Plus size={15} /> New automation</button></div></div>
     {error ? <div className="rmm-auto-error">{error}</div> : null}{notice ? <div className="rmm-auto-notice"><Check size={15} /> {notice}</div> : null}
     <div className="rmm-auto-summary"><article><Code2 size={18} /><span><strong>{automations.length}</strong><small>Automations</small></span></article><article><ShieldCheck size={18} /><span><strong>{published}</strong><small>Published</small></span></article><article><Upload size={18} /><span><strong>{drafts}</strong><small>Draft revisions</small></span></article><article><TerminalSquare size={18} /><span><strong>{policy?.actions?.length || 0}</strong><small>Tray actions</small></span></article></div>
     <div className="rmm-auto-tabs"><button className={tab === 'library' ? 'active' : ''} onClick={() => setTab('library')} type="button">Automation library</button><button className={tab === 'tray' ? 'active' : ''} onClick={() => setTab('tray')} type="button">System tray self-service</button></div>
-    {tab === 'library' ? <section className="rmm-auto-library">{automations.map((item) => <article className="rmm-auto-card" key={item.id}><header><span className="rmm-script-icon"><Code2 size={19} /></span><div><div><span className="rmm-eyebrow">{item.category} · Windows</span><Status>{item.status}</Status></div><h2>{item.name}</h2><p>{item.description || 'No description yet.'}</p></div></header><div className="rmm-auto-version-row"><span><small>Published</small><strong>{item.published_version_number ? `v${item.published_version_number}` : 'Not published'}</strong></span><span><small>Latest</small><strong>v{item.latest_version_number || 1} · {item.latest_version_state}</strong></span><span><small>SHA-256</small><strong>{shortHash(item.published_sha256 || item.latest_sha256)}</strong></span><span><small>Timeout</small><strong>{item.latest_timeout_seconds || 120}s</strong></span></div><footer><button onClick={() => setEditor(item)} type="button">Edit draft</button>{item.latest_version_state === 'draft' ? <button disabled={busyId === item.id} onClick={() => publish(item)} type="button"><Upload size={14} /> Publish</button> : null}<button className="rmm-primary compact" disabled={!item.published_version_id} onClick={() => setRunAutomation(item)} type="button"><Play size={14} /> Run</button></footer></article>)}</section> : <TrayPolicy automations={automations} policy={policy} onSaved={(next) => { setPolicy(next); setNotice('System tray policy saved.') }} />}
-    {!automations.length && tab === 'library' ? <div className="rmm-auto-empty large"><Code2 size={26} /><strong>No automations yet</strong><span>Create a PowerShell automation, save it as a draft, then explicitly publish the version you want devices to run.</span></div> : null}
+    {tab === 'library' ? <div className="rmm-auto-platform-filters" role="group" aria-label="Filter automations by operating system">{[['all','All'],['windows','Windows'],['macos','macOS'],['linux','Linux']].map(([value,label]) => <button className={platformFilter === value ? 'active' : ''} key={value} onClick={() => setPlatformFilter(value)} type="button">{value === 'all' ? <Code2 size={15} /> : <PlatformIcon platform={value} size={15} />}{label}<span>{value === 'all' ? automations.length : automations.filter((item) => normalizePlatform(item.platform) === value).length}</span></button>)}</div> : null}
+    {tab === 'library' ? <section className="rmm-auto-library">{filteredAutomations.map((item) => <article className="rmm-auto-card" key={item.id}><header><span className="rmm-script-icon"><PlatformIcon platform={item.platform} size={19} /></span><div><div><span className="rmm-eyebrow rmm-auto-platform-label"><PlatformIcon platform={item.platform} size={13} /> {item.category} · {platformLabel(item.platform)}</span><Status>{item.status}</Status></div><h2>{item.name}</h2><p>{item.description || 'No description yet.'}</p></div></header><div className="rmm-auto-version-row"><span><small>Published</small><strong>{item.published_version_number ? `v${item.published_version_number}` : 'Not published'}</strong></span><span><small>Latest</small><strong>v{item.latest_version_number || 1} · {item.latest_version_state}</strong></span><span><small>SHA-256</small><strong>{shortHash(item.published_sha256 || item.latest_sha256)}</strong></span><span><small>Timeout</small><strong>{item.latest_timeout_seconds || 120}s</strong></span></div><footer><button onClick={() => setEditor(item)} type="button">Edit draft</button>{item.latest_version_state === 'draft' ? <button disabled={busyId === item.id} onClick={() => publish(item)} type="button"><Upload size={14} /> Publish</button> : null}<button className="rmm-primary compact" disabled={!item.published_version_id} onClick={() => setRunAutomation(item)} type="button"><Play size={14} /> Run</button></footer></article>)}</section> : <TrayPolicy automations={automations} policy={policy} onSaved={(next) => { setPolicy(next); setNotice('System tray policy saved.') }} />}
+    {!automations.length && tab === 'library' ? <div className="rmm-auto-empty large"><Code2 size={26} /><strong>No automations yet</strong><span>Create an OS-specific automation, save it as a draft, then explicitly publish the version you want devices to run.</span></div> : null}
+    {automations.length > 0 && !filteredAutomations.length && tab === 'library' ? <div className="rmm-auto-empty large"><PlatformIcon platform={platformFilter} size={26} /><strong>No {platformLabel(platformFilter)} automations</strong><span>Choose another operating system or create a new automation for this platform.</span></div> : null}
     {editor ? <AutomationEditor automation={editor.new ? null : editor} onClose={() => setEditor(null)} onSaved={async () => { setEditor(null); setNotice('Draft saved.'); await load() }} /> : null}
     {runAutomation ? <RunPanel automation={runAutomation} devices={devices} onClose={() => setRunAutomation(null)} onQueued={(result) => { setRunAutomation(null); setNotice(result.queued + ' job' + (result.queued === 1 ? '' : 's') + ' started for online devices.' + (result.skippedOffline ? ' ' + result.skippedOffline + ' offline device' + (result.skippedOffline === 1 ? '' : 's') + ' skipped.' : '')) }} /> : null}
   </>

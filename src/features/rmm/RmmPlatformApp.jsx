@@ -67,7 +67,7 @@ import { RmmNetworkDiscovery } from './RmmNetworkDiscovery.jsx'
 import { RmmPatching as RmmPatchingWorkspace } from './RmmPatching.jsx'
 import { RmmAppPortal } from './RmmAppPortal.jsx'
 import { RmmAgentDeployment } from './RmmAgentDeployment.jsx'
-import { RmmAutomation } from './RmmAutomationWorkspace.jsx'
+import { RmmAutomation, RmmDeviceAutomationPanel } from './RmmAutomationWorkspace.jsx'
 import { RmmConnect } from './RmmConnect.jsx'
 import { DeviceActivityTimeline, DeviceJobsPanel, RmmAuditActivity, prefetchDeviceHistory } from './RmmActivityViews.jsx'
 import { detectRemoteViewerClient, launchRemoteViewerProtocol, remoteViewerDownloadUrl, remoteViewerPlatformLabel, viewerVersionNeedsUpdate } from './remoteViewerClient.js'
@@ -1810,6 +1810,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
   const [forgetWaylandBusy, setForgetWaylandBusy] = useState(false)
   const [viewerInstallPrompt, setViewerInstallPrompt] = useState(null)
   const [powerBusy, setPowerBusy] = useState(false)
+  const [automationOpen, setAutomationOpen] = useState(false)
   const [monitoringResolution, setMonitoringResolution] = useState(null)
   const [patchPolicyResolution, setPatchPolicyResolution] = useState(null)
   const [patchPolicyLoading, setPatchPolicyLoading] = useState(true)
@@ -2263,6 +2264,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
           <button className="rmm-primary compact" disabled={remoteBusy || !hasLiveAgent || !canRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canRemote ? 'Start unattended console remote session' : 'Your role does not include unattended remote access'} onClick={() => startRemote('console')} type="button"><Monitor size={16} /> {remoteBusy && remoteBusyMode === 'console' ? 'Starting…' : 'Remote desktop'}</button>
           <button disabled={remoteBusy || !hasLiveAgent || !canBackstageRemote || !deviceOnline} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : canBackstageRemote ? 'Start an isolated Background remote session' : 'Your role does not include Background remote access'} onClick={() => startRemote('backstage')} type="button"><Code2 size={16} /> {remoteBusy && remoteBusyMode === 'backstage' ? 'Starting…' : 'Background'}</button>
           <button disabled={!hasLiveAgent} title={!hasLiveAgent ? 'Hi5Central Agent required' : 'Open the full device tools workspace'} onClick={() => selectSection('tools')} type="button"><TerminalSquare size={16} /> Tools</button>
+          <button disabled={!hasLiveAgent} title={!hasLiveAgent ? 'Hi5Central Agent required' : `Run ${device.platform || device.os || 'device'} automations on this device`} onClick={() => setAutomationOpen(true)} type="button"><Zap size={16} /> Automations</button>
           <button disabled={!hasLiveAgent || !deviceOnline || powerBusy} title={!hasLiveAgent ? 'Hi5Central Agent required' : !deviceOnline ? 'Device is offline' : 'Restart this device'} onClick={restartDevice} type="button"><RefreshCw size={16} /> {powerBusy ? 'Restarting…' : 'Restart'}</button>
           <button onClick={() => createIncident()} type="button"><AlertTriangle size={16} /> ITSM incident</button>
         </div>
@@ -2314,6 +2316,7 @@ function RmmDeviceDetail({ canBackstageRemote = false, canRemote = false, device
 
       <div className={'rmm-device-section ' + (section === 'tools' ? 'is-tools' : '')}>{content}</div>
       <ViewerInstallPrompt prompt={viewerInstallPrompt} onClose={() => setViewerInstallPrompt(null)} onRetry={retryNativeViewer} />
+      {automationOpen ? <RmmDeviceAutomationPanel device={device} onClose={() => setAutomationOpen(false)} /> : null}
     </div>
   )
 }
