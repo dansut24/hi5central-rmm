@@ -749,7 +749,32 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 .rmm-agent-security-card > div svg { color: #239e63; }
 .rmm-agent-error { margin-bottom: 12px; border: 1px solid rgba(218,73,91,.24); border-radius: 9px; padding: 10px 12px; background: rgba(218,73,91,.08); color: #c83f50; font-size: 9px; font-weight: 800; }
 
+.rmm-agent-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.rmm-agent-heading-actions button { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; }
+.rmm-agent-builder { display: grid; gap: 14px; margin-bottom: 14px; }
+.rmm-agent-builder-fields { display: grid; grid-template-columns: minmax(180px,.8fr) minmax(220px,1fr) auto; align-items: end; gap: 12px; }
+.rmm-agent-builder-fields label { display: grid; gap: 6px; min-width: 0; }
+.rmm-agent-builder-fields label > span { font-size: 8px; font-weight: 850; color: var(--rmm-text); }
+.rmm-agent-builder-fields label > small { min-height: 12px; color: var(--rmm-muted); font-size: 7px; }
+.rmm-agent-builder-fields select { width: 100%; min-height: 36px; border: 1px solid var(--rmm-border); border-radius: 8px; padding: 0 10px; background: var(--rmm-surface); color: var(--rmm-text); font: inherit; font-size: 9px; }
+.rmm-agent-builder-fields > button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.rmm-agent-shared-installer-note { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 9px; border: 1px solid var(--rmm-border); border-radius: 9px; padding: 10px 11px; background: var(--rmm-soft); }
+.rmm-agent-shared-installer-note > svg { color: #239e63; }
+.rmm-agent-shared-installer-note > div { display: grid; gap: 2px; }
+.rmm-agent-shared-installer-note strong { font-size: 8px; }
+.rmm-agent-shared-installer-note span { color: var(--rmm-muted); font-size: 8px; line-height: 1.45; }
 .rmm-agent-issued-card { display: grid; gap: 10px; margin-bottom: 14px; }
+.rmm-agent-issued-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.rmm-agent-issued-actions button { min-height: 31px; display: inline-flex; align-items: center; gap: 5px; }
+.rmm-agent-build-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--rmm-border); border-radius: 8px; padding: 9px 10px; background: var(--rmm-soft); color: var(--rmm-muted); font-size: 8px; font-weight: 750; }
+.rmm-agent-build-state.ready { border-color: rgba(35,158,99,.2); background: rgba(35,158,99,.07); color: #188c61; }
+.rmm-agent-build-state.error { border-color: rgba(218,73,91,.24); background: rgba(218,73,91,.08); color: #c8384f; }
+.rmm-agent-build-state button { min-height: 28px; flex: 0 0 auto; }
+.rmm-agent-artifact-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.rmm-agent-artifact-buttons .rmm-primary { min-height: 30px; padding-inline: 9px; }
+.rmm-agent-artifact-buttons .rmm-primary:disabled { opacity: .48; cursor: not-allowed; }
+.rmm-agent-package-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 560px; }
+.rmm-agent-package-actions > button { min-height: 30px; }
 .rmm-agent-command-list { display: grid; gap: 12px; }
 .rmm-agent-command-group { display: grid; gap: 6px; }
 .rmm-agent-command-group > strong { font-size: 9px; }
@@ -766,10 +791,16 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 
 @media (max-width: 900px) {
   .rmm-agent-deployment-grid { grid-template-columns: 1fr; }
+  .rmm-agent-builder-fields { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .rmm-agent-builder-fields > button { grid-column: 1 / -1; width: 100%; }
   .rmm-agent-package-row { grid-template-columns: minmax(140px,1.4fr) .7fr .6fr 1fr auto; }
 }
 
 @media (max-width: 640px) {
+  .rmm-agent-builder { overflow: hidden; }
+  .rmm-agent-builder-fields { grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .rmm-agent-builder-fields > button { grid-column: 1; width: 100%; }
+  .rmm-agent-builder-fields label > small { min-height: 0; }
   .rmm-agent-command { grid-template-columns: 1fr; }
   .rmm-agent-package-row.head { display: none; }
   .rmm-agent-package-row { grid-template-columns: 1fr auto; gap: 6px 10px; }
@@ -832,8 +863,7 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
   .rmm-shell-main { grid-template-rows: 68px minmax(0, 1fr); }
   .rmm-sidebar { padding: 17px 14px 14px; }
   .rmm-nav-section > span { font-size: 10px; }
-  .rmm-nav-section button { min-height: 42px; font-size: 12px; }
-  .rmm-sidebar-brand strong { font-size: 13px; }
+  .rmm-nav-section button { min-height: 42px; font-size: 12px; }  .rmm-sidebar-brand strong { font-size: 13px; }
   .rmm-sidebar-brand span { font-size: 10px; }
   .rmm-estate-chip strong, .rmm-sidebar-footer strong { font-size: 11px; }
   .rmm-estate-chip small, .rmm-sidebar-footer small { font-size: 10px; }
@@ -1682,8 +1712,7 @@ button.rmm-device-metric.patch:hover { border-color: color-mix(in srgb,var(--rmm
 .rmm-patch-vuln-list > article > p { margin: 0; color: var(--rmm-muted); font-size: 9px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Device Software/Patching mobile cards ----------------------------------- */
-@media (max-width: 640px) {
-  .rmm-device-software-card,
+@media (max-width: 640px) {  .rmm-device-software-card,
   .rmm-device-app-patching-card,
   .rmm-device-windows-patching-card {
     width: 100%;
