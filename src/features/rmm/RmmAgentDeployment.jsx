@@ -227,6 +227,14 @@ export function RmmAgentDeployment() {
     }
   }
 
+  async function downloadInstallerBundle(pkg, installerUrl) {
+    setError('')
+    downloadUrl(installerUrl)
+    if (pkg?.persistent && !['exe', 'msi'].includes(String(pkg.installer_format || '').toLowerCase())) {
+      await downloadDeploymentConfig(pkg)
+    }
+  }
+
   async function copyText(value, key) {
     if (!value) return
     try {
@@ -316,12 +324,12 @@ export function RmmAgentDeployment() {
                   : ' This installer currently uses the deployment configuration shown below.'}
               </p>
               <div className="rmm-agent-issued-actions">
-                <button className="rmm-primary compact" onClick={() => downloadUrl(issued.installer?.url)} type="button">
-                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}
+                <button className="rmm-primary compact" onClick={() => downloadInstallerBundle(issued.package, issued.installer?.url)} type="button">
+                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}{!['exe', 'msi'].includes(issued.package.installer_format) ? ' + config' : ''}
                 </button>
                 {!['exe', 'msi'].includes(issued.package.installer_format) ? (
                   <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
-                    <Download size={15} /> Download JSON
+                    <Download size={15} /> Config only
                   </button>
                 ) : null}
                 {installCommand(issued.package, issued.installCommand) ? (
@@ -375,12 +383,12 @@ export function RmmAgentDeployment() {
                 <span>
                   {pkg.persistent && !pkg.revoked_at ? (
                     <div className="rmm-agent-package-actions">
-                      <button className="rmm-secondary compact" onClick={() => downloadUrl(pkg.installer_url)} type="button">
-                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}
+                      <button className="rmm-secondary compact" onClick={() => downloadInstallerBundle(pkg, pkg.installer_url)} type="button">
+                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}{!['exe', 'msi'].includes(pkg.installer_format) ? ' + config' : ''}
                       </button>
-                      {pkg.installer_format !== 'exe' ? (
+                      {!['exe', 'msi'].includes(pkg.installer_format) ? (
                         <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(pkg)} type="button">
-                          <Download size={14} /> JSON
+                          <Download size={14} /> Config only
                         </button>
                       ) : null}
                       <button className="rmm-secondary compact" onClick={() => copyText(installCommand(pkg), `command:${pkg.id}`)} type="button">
