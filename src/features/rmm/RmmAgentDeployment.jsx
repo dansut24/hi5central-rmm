@@ -207,32 +207,16 @@ export function RmmAgentDeployment() {
     anchor.remove()
   }
 
-  async function downloadDeploymentConfig(pkg) {
+  function downloadDeploymentConfig(pkg) {
     setError('')
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(pkg.id)}/deployment-config`,
-        { credentials: 'include' },
-      )
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(payload.error || 'Unable to download deployment JSON.')
-      }
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      downloadUrl(url, 'Hi5CentralDeployment.json')
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch (downloadError) {
-      setError(downloadError.message)
-    }
+    if (!pkg?.id) return
+    const path = pkg.deployment_config_url || `/api/v1/rmm/agent/enrollment-packages/${encodeURIComponent(pkg.id)}/deployment-config`
+    downloadUrl(path.startsWith('http') ? path : `${API_BASE}${path}`, 'Hi5CentralDeployment.json')
   }
 
-  async function downloadInstallerBundle(pkg, installerUrl) {
+  function downloadInstallerBundle(pkg, installerUrl) {
     setError('')
     downloadUrl(installerUrl)
-    if (pkg?.persistent && !['exe', 'msi'].includes(String(pkg.installer_format || '').toLowerCase())) {
-      await downloadDeploymentConfig(pkg)
-    }
   }
 
   async function copyText(value, key) {
@@ -325,7 +309,7 @@ export function RmmAgentDeployment() {
               </p>
               <div className="rmm-agent-issued-actions">
                 <button className="rmm-primary compact" onClick={() => downloadInstallerBundle(issued.package, issued.installer?.url)} type="button">
-                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}{!['exe', 'msi'].includes(issued.package.installer_format) ? ' + config' : ''}
+                  <Download size={15} /> Download {String(issued.package.installer_format || '').toUpperCase()}{issued.package.installer_platform === 'linux' ? ' bundle' : (!['exe', 'msi'].includes(issued.package.installer_format) ? ' + config' : '')}
                 </button>
                 {!['exe', 'msi'].includes(issued.package.installer_format) ? (
                   <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(issued.package)} type="button">
@@ -384,7 +368,7 @@ export function RmmAgentDeployment() {
                   {pkg.persistent && !pkg.revoked_at ? (
                     <div className="rmm-agent-package-actions">
                       <button className="rmm-secondary compact" onClick={() => downloadInstallerBundle(pkg, pkg.installer_url)} type="button">
-                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}{!['exe', 'msi'].includes(pkg.installer_format) ? ' + config' : ''}
+                        <Download size={14} /> {String(pkg.installer_format || '').toUpperCase()}{pkg.installer_platform === 'linux' ? ' bundle' : (!['exe', 'msi'].includes(pkg.installer_format) ? ' + config' : '')}
                       </button>
                       {!['exe', 'msi'].includes(pkg.installer_format) ? (
                         <button className="rmm-secondary compact" onClick={() => downloadDeploymentConfig(pkg)} type="button">
